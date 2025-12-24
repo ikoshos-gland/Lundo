@@ -1,0 +1,98 @@
+[
+  {
+    "title": "The 1-2-3 Magic Technique",
+    "category": "discipline",
+    "age_range": [2, 12],
+    "difficulty": "easy",
+    "issues_addressed": ["misbehavior", "tantrums", "defiance", "compliance"],
+    "description": "When child misbehaves, calmly count '1... 2... 3'. At 3, implement timeout or consequence. No arguing or explaining during count. Brief, consistent, emotionless. Works by giving child chance to self-correct before consequence."
+  },
+  {
+    "title": "Positive Reinforcement Jar",
+    "category": "behavior modification",
+    "age_range": [3, 10],
+    "difficulty": "easy",
+    "issues_addressed": ["positive behavior", "motivation", "compliance", "habits"],
+    "description": "Child earns marbles/pom-poms for positive behaviors. When jar full, earns agreed-upon reward. Make goals specific and achievable. Celebrate small wins. Focus on what you want to see MORE of, not less of."
+  },
+  {
+    "title": "First-Then Strategy",
+    "category": "transitions",
+    "age_range": [2, 8],
+    "difficulty": "easy",
+    "issues_addressed": ["transitions", "compliance", "resistance", "cooperation"],
+    "description": "Use 'First [unpreferred task], then [preferred activity]' format. Example: 'First clean up toys, then iPad time.' Visual schedule helps. Prevents power struggles by offering clear sequence and motivation."
+  },
+  {
+    "title": "Emotion Coaching (5 Steps)",
+    "category": "emotional regulation",
+    "age_range": [2, 18],
+    "difficulty": "medium",
+    "issues_addressed": ["tantrums", "emotions", "meltdowns", "dysregulation"],
+    "description": "1) Be aware of child's emotions 2) Recognize emotional moments as opportunities 3) Listen with empathy & validate 4) Help child label emotions 5) Set limits while helping solve problems. Don't dismiss or minimize feelings."
+  },
+  {
+    "title": "Planned Ignoring",
+    "category": "behavior modification",
+    "age_range": [2, 10],
+    "difficulty": "medium",
+    "issues_addressed": ["attention-seeking", "whining", "tantrums", "negative behavior"],
+    "description": "Deliberately withhold attention for minor misbehaviors (whining, arguing). Must be safe to ignore. Remain neutral and calm. Expect behavior to worsen before improving (extinction burst). Immediately give attention when behavior stops or improves."
+  },
+  {
+    "title": "Clear Behavior Expectations (Family Rules)",
+    "category": "prevention",
+    "age_range": [3, 18],
+    "difficulty": "easy",
+    "issues_addressed": ["misbehavior", "boundaries", "clarity", "consistency"],
+    "description": "Create 3-5 simple, positively stated family rules. Post visibly. Rules should say what TO do, not what NOT to do. Examples: 'Use kind words', 'Keep hands to yourself'. Review regularly. Consistency from all caregivers is crucial."
+  },
+  {
+    "title": "Offering Choices",
+    "category": "cooperation",
+    "age_range": [2, 10],
+    "difficulty": "easy",
+    "issues_addressed": ["defiance", "power struggles", "autonomy", "cooperation"],
+    "description": "Offer two acceptable choices instead of demands. 'Do you want to wear red shirt or blue shirt?' (not 'would you like to get dressed?'). Gives sense of control while maintaining parent's goals. Reduces power struggles."
+  },
+  {
+    "title": "Natural and Logical Consequences",
+    "category": "discipline",
+    "age_range": [4, 18],
+    "difficulty": "medium",
+    "issues_addressed": ["responsibility", "cause-effect", "decision making"],
+    "description": "Natural: Let natural outcome occur (forget coat = feel cold). Logical: Consequence relates to misbehavior (break toy = no toy, throw food = meal over). Must be safe, related, reasonable, and respectful. Teaches responsibility without punishment."
+  },
+  {
+    "title": "Preventive Teaching",
+    "category": "prevention",
+    "age_range": [3, 12],
+    "difficulty": "medium",
+    "issues_addressed": ["new situations", "transitions", "social skills", "expectations"],
+    "description": "Before challenging situation, practice expected behavior. Use roleplay, social stories, or rehearsal. Example: Before grocery store, practice 'store behavior'. Set clear expectations proactively rather than reactively correcting."
+  },
+  {
+    "title": "Calm-Down Corner (Not Timeout)",
+    "category": "emotional regulation",
+    "age_range": [3, 10],
+    "difficulty": "easy",
+    "issues_addressed": ["emotional regulation", "self-calming", "overwhelm"],
+    "description": "Create cozy space with calming items (pillows, stuffed animals, books, sensory toys). Child can use voluntarily when overwhelmed. Not punishment - it's a tool for regulation. Can suggest but don't force. Make it positive and safe."
+  },
+  {
+    "title": "Reflective Listening",
+    "category": "communication",
+    "age_range": [4, 18],
+    "difficulty": "medium",
+    "issues_addressed": ["communication", "connection", "understanding", "validation"],
+    "description": "Reflect back child's feelings and content. 'You're really frustrated that you can't have dessert right now.' Validates without necessarily agreeing. Shows you understand. Helps child feel heard. Reduces intensity of emotions."
+  },
+  {
+    "title": "Consistent Bedtime Routine",
+    "category": "routines",
+    "age_range": [0, 12],
+    "difficulty": "easy",
+    "issues_addressed": ["sleep", "bedtime resistance", "routine", "transitions"],
+    "description": "Same sequence every night (bath, pajamas, brush teeth, story, bed). 30-60 minutes. Calming activities only. Visual schedule helps. Consistency signals brain it's sleep time. Reduces bedtime battles and improves sleep quality."
+  }
+]

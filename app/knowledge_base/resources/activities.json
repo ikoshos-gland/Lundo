@@ -1,0 +1,82 @@
+[
+  {
+    "name": "Emotion Faces Game",
+    "age_range": [3, 7],
+    "description": "Draw or print different emotion faces (happy, sad, angry, scared, excited). Have child match emotions to situations or act them out. Helps with emotional identification.",
+    "duration_minutes": 15,
+    "materials": ["paper", "crayons", "emotion cards (optional)"],
+    "skills_developed": ["emotional intelligence", "facial recognition", "communication"]
+  },
+  {
+    "name": "Calm Down Jar (Glitter Jar)",
+    "age_range": [3, 10],
+    "description": "Fill a clear jar with water, glitter glue, and glitter. When upset, child shakes jar and watches glitter settle while taking deep breaths. Visual aid for self-regulation.",
+    "duration_minutes": 30,
+    "materials": ["clear jar", "water", "glitter glue", "glitter", "food coloring (optional)"],
+    "skills_developed": ["self-regulation", "emotional regulation", "mindfulness"]
+  },
+  {
+    "name": "Turn-Taking Board Games",
+    "age_range": [4, 10],
+    "description": "Play simple board games like Candy Land, Chutes and Ladders, or Hi Ho Cherry-O. Practice waiting for turns, winning gracefully, and losing without tantrums.",
+    "duration_minutes": 20,
+    "materials": ["age-appropriate board game"],
+    "skills_developed": ["patience", "turn-taking", "social skills", "emotional regulation"]
+  },
+  {
+    "name": "Feelings Thermometer",
+    "age_range": [5, 12],
+    "description": "Create a visual thermometer (1-10 scale) to help child identify intensity of emotions. Use colors (green=calm, yellow=worried, red=very upset). Check in daily.",
+    "duration_minutes": 10,
+    "materials": ["paper", "markers", "thermometer template (optional)"],
+    "skills_developed": ["emotional awareness", "self-monitoring", "communication"]
+  },
+  {
+    "name": "Cooperative Building",
+    "age_range": [3, 10],
+    "description": "Build something together using blocks, Legos, or cardboard boxes. Must work as a team with each person adding pieces. No competition, just creation.",
+    "duration_minutes": 30,
+    "materials": ["building blocks", "Legos", "or cardboard boxes"],
+    "skills_developed": ["cooperation", "sharing", "communication", "teamwork"]
+  },
+  {
+    "name": "Breath Buddies",
+    "age_range": [3, 8],
+    "description": "Child lies down with stuffed animal on belly. Watch the 'buddy' rise and fall with deep breaths. Count 4 in, hold 4, out 4. Makes breathing exercises fun.",
+    "duration_minutes": 5,
+    "materials": ["stuffed animal"],
+    "skills_developed": ["self-regulation", "anxiety management", "body awareness"]
+  },
+  {
+    "name": "Sharing Practice with Timer",
+    "age_range": [3, 7],
+    "description": "Use a visual timer for sharing toys. Each child gets the toy for set time (3-5 min). Timer makes turn-taking concrete and reduces conflicts.",
+    "duration_minutes": 15,
+    "materials": ["visual timer", "desirable toy"],
+    "skills_developed": ["sharing", "patience", "turn-taking", "delayed gratification"]
+  },
+  {
+    "name": "Worry Box",
+    "age_range": [5, 12],
+    "description": "Decorate a box together. When worried, child writes/draws worry and puts it in box. Set time to 'check worries' together. Externalizes anxiety.",
+    "duration_minutes": 20,
+    "materials": ["small box", "decorating supplies", "paper", "pencils"],
+    "skills_developed": ["anxiety management", "coping skills", "communication"]
+  },
+  {
+    "name": "Freeze Dance",
+    "age_range": [3, 8],
+    "description": "Play music and dance. When music stops, freeze in place. Great for impulse control and following directions while having fun.",
+    "duration_minutes": 15,
+    "materials": ["music player"],
+    "skills_developed": ["impulse control", "listening", "body control", "following directions"]
+  },
+  {
+    "name": "Compliment Circle",
+    "age_range": [5, 12],
+    "description": "Family sits in circle. Each person gives genuine compliment to person next to them. Builds positive communication and self-esteem.",
+    "duration_minutes": 10,
+    "materials": ["none"],
+    "skills_developed": ["positive communication", "empathy", "self-esteem", "kindness"]
+  }
+]

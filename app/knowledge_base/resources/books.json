@@ -1,0 +1,82 @@
+[
+  {
+    "title": "The Feelings Book",
+    "author": "Todd Parr",
+    "age_range": [3, 7],
+    "topics": ["emotions", "feelings", "emotional intelligence"],
+    "description": "A vibrant, colorful book that helps young children identify and express their feelings. Uses simple language and relatable situations to normalize all emotions.",
+    "amazon_link": ""
+  },
+  {
+    "title": "Hands Are Not for Hitting",
+    "author": "Martine Agassi",
+    "age_range": [2, 7],
+    "topics": ["aggression", "hitting", "behavior", "gentle hands"],
+    "description": "Teaches children alternative ways to express frustration and anger. Emphasizes positive uses of hands like hugging, creating, and helping.",
+    "amazon_link": ""
+  },
+  {
+    "title": "The Way I Feel",
+    "author": "Janan Cain",
+    "age_range": [4, 8],
+    "topics": ["emotions", "emotional regulation", "feelings"],
+    "description": "Explores a range of emotions through rhyming text and expressive illustrations. Helps children name and understand their feelings.",
+    "amazon_link": ""
+  },
+  {
+    "title": "Should I Share My Ice Cream?",
+    "author": "Mo Willems",
+    "age_range": [3, 7],
+    "topics": ["sharing", "social skills", "decision making"],
+    "description": "A humorous story about Gerald the elephant's internal debate about sharing. Great for discussing the challenges of sharing.",
+    "amazon_link": ""
+  },
+  {
+    "title": "What to Do When You Worry Too Much",
+    "author": "Dawn Huebner",
+    "age_range": [6, 12],
+    "topics": ["anxiety", "worry", "coping strategies"],
+    "description": "An interactive self-help book that teaches children how to tame their worries using cognitive-behavioral techniques.",
+    "amazon_link": ""
+  },
+  {
+    "title": "The Kissing Hand",
+    "author": "Audrey Penn",
+    "age_range": [3, 8],
+    "topics": ["separation anxiety", "school", "attachment", "comfort"],
+    "description": "A heartwarming story about a raccoon going to school for the first time. Provides comfort for children experiencing separation anxiety.",
+    "amazon_link": ""
+  },
+  {
+    "title": "My Many Colored Days",
+    "author": "Dr. Seuss",
+    "age_range": [3, 8],
+    "topics": ["emotions", "mood", "feelings", "colors"],
+    "description": "Uses colors and animals to represent different emotions and moods. Helps children recognize that emotions change throughout the day.",
+    "amazon_link": ""
+  },
+  {
+    "title": "The Invisible String",
+    "author": "Patrice Karst",
+    "age_range": [4, 10],
+    "topics": ["separation", "attachment", "connection", "comfort"],
+    "description": "Teaches children that even when apart from loved ones, they are always connected. Comforting for separation anxiety and loss.",
+    "amazon_link": ""
+  },
+  {
+    "title": "I Can Do Hard Things",
+    "author": "Gabi Garcia",
+    "age_range": [4, 8],
+    "topics": ["resilience", "growth mindset", "perseverance", "confidence"],
+    "description": "Encourages children to embrace challenges and believe in their abilities. Promotes a growth mindset and resilience.",
+    "amazon_link": ""
+  },
+  {
+    "title": "The Whole-Brain Child",
+    "author": "Daniel J. Siegel",
+    "age_range": [0, 12],
+    "topics": ["parenting", "brain development", "emotional regulation"],
+    "description": "FOR PARENTS: Explains brain development and provides practical strategies for nurturing a child's developing mind. Evidence-based approaches to common parenting challenges.",
+    "amazon_link": ""
+  }
+]
