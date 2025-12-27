@@ -236,7 +236,7 @@ async def delete_child(
             detail="Not authorized to delete this child profile"
         )
 
-    await db.delete(child)
+    db.delete(child)
     await db.commit()
 
     return None

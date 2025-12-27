@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.database.session import get_db
 from app.models.user import User
 from app.utils.security import decode_token
+from app.services.firebase import verify_firebase_token
 
 # HTTP Bearer token scheme
 security = HTTPBearer()
@@ -19,7 +20,9 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db)
 ) -> User:
     """
-    Get current authenticated user from JWT token.
+    Get current authenticated user from Firebase or JWT token.
+
+    Tries Firebase token first, falls back to JWT.
 
     Args:
         credentials: HTTP Authorization credentials
@@ -37,10 +40,52 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    token = credentials.credentials
+    user_id: Optional[str] = None
+    firebase_uid: Optional[str] = None
+    email: Optional[str] = None
+
+    # Try Firebase token first
+    firebase_claims = verify_firebase_token(token)
+    if firebase_claims:
+        firebase_uid = firebase_claims.get("uid")
+        email = firebase_claims.get("email")
+
+        # Look up user by firebase_uid or email
+        if firebase_uid:
+            result = await db.execute(
+                select(User).where(User.firebase_uid == firebase_uid)
+            )
+            user = result.scalar_one_or_none()
+
+            if user is None and email:
+                # Try to find by email and link Firebase account
+                result = await db.execute(
+                    select(User).where(User.email == email)
+                )
+                user = result.scalar_one_or_none()
+                if user:
+                    # Link Firebase UID to existing user
+                    user.firebase_uid = firebase_uid
+                    user.is_verified = firebase_claims.get("email_verified", False)
+                    await db.commit()
+                    await db.refresh(user)
+
+            if user is None:
+                raise credentials_exception
+
+            if not user.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="User account is inactive"
+                )
+
+            return user
+
+    # Fall back to JWT token
     try:
-        token = credentials.credentials
         payload = decode_token(token)
-        user_id: str = payload.get("sub")
+        user_id = payload.get("sub")
 
         if user_id is None:
             raise credentials_exception
@@ -48,7 +93,7 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    # Get user from database
+    # Get user from database by ID
     result = await db.execute(
         select(User).where(User.id == int(user_id))
     )

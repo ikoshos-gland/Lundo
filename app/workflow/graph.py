@@ -1,4 +1,5 @@
 """LangGraph workflow for the child behavioral therapist system."""
+import logging
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
@@ -14,6 +15,8 @@ from app.workflow.nodes import (
     synthesize_response,
     format_output
 )
+
+logger = logging.getLogger(__name__)
 
 
 def create_therapist_workflow():
@@ -52,36 +55,12 @@ def create_therapist_workflow():
     workflow.add_edge("route_to_agents", "call_behavior_analyst")
     workflow.add_edge("call_behavior_analyst", "apply_psychological_perspective")
     workflow.add_edge("apply_psychological_perspective", "call_material_consultant")
-    workflow.add_edge("call_material_consultant", "safety_check")
-    workflow.add_edge("safety_check", "synthesize_response")
-    workflow.add_edge("synthesize_response", "format_output")
+    workflow.add_edge("call_material_consultant", "synthesize_response")
+    workflow.add_edge("synthesize_response", "safety_check")
+    workflow.add_edge("safety_check", "format_output")
     workflow.add_edge("format_output", END)
 
     return workflow
-
-
-async def create_compiled_workflow():
-    """
-    Create and compile the workflow with checkpointer.
-
-    Returns:
-        Compiled workflow ready for execution
-    """
-    workflow = create_therapist_workflow()
-
-    # Create checkpointer for conversation state persistence
-    checkpointer = AsyncPostgresSaver.from_conn_string(
-        settings.database_url
-    )
-    await checkpointer.setup()
-
-    # Compile the workflow
-    compiled_workflow = workflow.compile(
-        checkpointer=checkpointer,
-        # interrupt_before=["synthesize_response"]  # Uncomment for human-in-the-loop
-    )
-
-    return compiled_workflow
 
 
 async def run_therapist_workflow(
@@ -108,8 +87,11 @@ async def run_therapist_workflow(
     """
     from langchain_core.messages import HumanMessage
 
-    # Create compiled workflow
-    workflow = await create_compiled_workflow()
+    logger.info(f"[WORKFLOW] Starting workflow for thread {thread_id}")
+
+    # Create the workflow graph
+    workflow = create_therapist_workflow()
+    logger.info("[WORKFLOW] Workflow graph created")
 
     # Initial state
     initial_state = {
@@ -139,7 +121,21 @@ async def run_therapist_workflow(
         }
     }
 
-    # Run the workflow
-    final_state = await workflow.ainvoke(initial_state, config=config)
+    logger.info(f"[WORKFLOW] Connecting to postgres: {settings.postgres_connection_string}")
+    
+    try:
+        # TEMPORARILY: Run without checkpointer to test workflow
+        # TODO: Debug checkpointer.setup() hanging issue
+        logger.info("[WORKFLOW] Compiling workflow WITHOUT checkpointer (temporary)")
+        compiled_workflow = workflow.compile()
+        logger.info("[WORKFLOW] Workflow compiled, starting invoke...")
 
-    return final_state
+        # Run the workflow (no persistence for now)
+        final_state = await compiled_workflow.ainvoke(initial_state)
+        logger.info("[WORKFLOW] Workflow completed successfully")
+
+        return final_state
+    
+    except Exception as e:
+        logger.error(f"[WORKFLOW] Error: {type(e).__name__}: {str(e)}", exc_info=True)
+        raise

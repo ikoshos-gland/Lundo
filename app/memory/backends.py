@@ -1,9 +1,25 @@
 """Memory backend configuration for dual-layer memory system."""
+import asyncio
+import logging
 from typing import Any, Dict, Optional, List
-from langgraph.store.memory import InMemoryStore
 from langgraph.store.base import BaseStore
+from langgraph.store.postgres.aio import AsyncPostgresStore
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langchain.embeddings import init_embeddings
+from langchain_openai import AzureOpenAIEmbeddings
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Singleton instance - will be initialized on first use
+_memory_backends_instance: "MemoryBackends | None" = None
+
+
+def get_memory_backends() -> "MemoryBackends":
+    """Get the singleton MemoryBackends instance."""
+    global _memory_backends_instance
+    if _memory_backends_instance is None:
+        _memory_backends_instance = MemoryBackends(settings.postgres_connection_string)
+    return _memory_backends_instance
 
 
 class MemoryBackends:
@@ -32,6 +48,9 @@ class MemoryBackends:
         self.embeddings_model = embeddings_model
         self._checkpointer = None
         self._store = None
+        self._store_cm = None  # Store the context manager for cleanup
+        self._store_lock: asyncio.Lock | None = None  # Created lazily in async context
+        self._store_initialized = False
 
     async def get_checkpointer(self) -> AsyncPostgresSaver:
         """
@@ -53,32 +72,71 @@ class MemoryBackends:
         """
         Get store for long-term memory (persistent across threads).
 
-        Uses InMemoryStore with semantic search for development.
-        For production, use AsyncPostgresStore.
+        Uses AsyncPostgresStore with semantic search for persistent storage.
+        Data survives server restarts.
 
         Returns:
             BaseStore instance
         """
-        if self._store is None:
+        # Fast path - already initialized
+        if self._store_initialized and self._store is not None:
+            return self._store
+
+        # Create lock lazily in async context (must be in same event loop)
+        if self._store_lock is None:
+            self._store_lock = asyncio.Lock()
+
+        # Acquire lock to prevent concurrent initialization
+        logger.info("[MEMORY] Waiting to acquire store lock...")
+        async with self._store_lock:
+            logger.info("[MEMORY] Lock acquired")
+            # Double-check after acquiring lock
+            if self._store_initialized and self._store is not None:
+                logger.info("[MEMORY] Store already initialized, returning")
+                return self._store
+
+            logger.info("[MEMORY] Initializing AsyncPostgresStore...")
+
+            # Convert SQLAlchemy URL to libpq format for AsyncPostgresStore
+            conn_string = settings.postgres_connection_string
+
             if self.use_semantic_search:
                 # Initialize embeddings for semantic search
-                embeddings = init_embeddings(self.embeddings_model)
+                # Use dimensions=1536 to stay under pgvector HNSW limit of 2000
+                embeddings = AzureOpenAIEmbeddings(
+                    azure_deployment=settings.azure_openai_embedding_deployment,
+                    azure_endpoint=settings.azure_openai_embedding_endpoint,
+                    api_key=settings.azure_openai_embedding_api_key,
+                    api_version="2024-12-01-preview",
+                    dimensions=1536  # Reduce from 3072 to fit HNSW index limit
+                )
 
-                # InMemoryStore with semantic search
-                # For production, replace with:
-                # from langgraph.store.postgres.aio import AsyncPostgresStore
-                # self._store = AsyncPostgresStore.from_conn_string(self.database_url)
-                # await self._store.setup()
-
-                self._store = InMemoryStore(
+                # AsyncPostgresStore returns an async context manager
+                # We need to enter it and store both the CM and the store
+                self._store_cm = AsyncPostgresStore.from_conn_string(
+                    conn_string,
                     index={
                         "embed": embeddings,
-                        "dims": 768,  # Google text-embedding-004 dimension
+                        "dims": 1536,  # Reduced to fit pgvector HNSW limit (max 2000)
                         "fields": ["$"]  # Index all fields
                     }
                 )
             else:
-                self._store = InMemoryStore()
+                # AsyncPostgresStore without semantic search
+                self._store_cm = AsyncPostgresStore.from_conn_string(conn_string)
+
+            # Enter the async context manager to get the actual store
+            logger.info("[MEMORY] Entering context manager...")
+            self._store = await self._store_cm.__aenter__()
+            logger.info("[MEMORY] Context manager entered")
+
+            # Setup creates required tables if they don't exist
+            logger.info("[MEMORY] Running AsyncPostgresStore setup...")
+            await self._store.setup()
+            logger.info("[MEMORY] Setup complete")
+
+            self._store_initialized = True
+            logger.info("[MEMORY] AsyncPostgresStore initialized - memories are now persistent!")
 
         return self._store
 
@@ -183,7 +241,8 @@ class MemoryBackends:
             "developmental_history",
             "successful_interventions",
             "triggers_and_responses",
-            "timeline_events"
+            "timeline_events",
+            "family_context"
         ]
 
         results = []
@@ -242,7 +301,8 @@ class MemoryBackends:
             "developmental_history",
             "successful_interventions",
             "triggers_and_responses",
-            "timeline_events"
+            "timeline_events",
+            "family_context"
         ]
 
         for memory_type in memory_types:
@@ -258,6 +318,13 @@ class MemoryBackends:
             # AsyncPostgresSaver handles cleanup automatically
             pass
 
-        if self._store:
-            # Store cleanup if needed
-            pass
+        if self._store_cm:
+            # Exit the async context manager to close connections
+            try:
+                await self._store_cm.__aexit__(None, None, None)
+                logger.info("[MEMORY] AsyncPostgresStore connection closed")
+            except Exception as e:
+                logger.error(f"[MEMORY] Error closing store: {e}")
+            finally:
+                self._store = None
+                self._store_cm = None

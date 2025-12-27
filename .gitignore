@@ -90,3 +90,10 @@ Thumbs.db
 *.key
 *.crt
 secrets/
+
+# Firebase
+firebase-credentials.json
+*-firebase-adminsdk-*.json
+
+# Windows/WSL artifacts
+*Zone.Identifier

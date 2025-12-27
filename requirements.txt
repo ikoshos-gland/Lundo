@@ -1,13 +1,15 @@
 # LangChain & LangGraph
 langchain>=0.3.0
 langchain-google-genai>=2.0.0
+langchain-openai>=0.2.0
 langgraph>=0.2.0
+langgraph-checkpoint-postgres>=2.0.0
 langchain-community>=0.3.0
 langchain-core>=0.3.0
 
 # Vector Store & Embeddings
 chromadb>=0.5.0
-sentence-transformers>=3.0.0
+# Using Google embeddings via langchain-google-genai (no PyTorch needed)
 
 # Database
 sqlalchemy>=2.0.0
@@ -33,6 +35,9 @@ prometheus-client>=0.19.0
 # Async Tasks
 celery>=5.3.0
 flower>=2.0.0
+
+# Firebase Authentication
+firebase-admin>=6.4.0
 
 # Utilities
 python-dotenv>=1.0.0

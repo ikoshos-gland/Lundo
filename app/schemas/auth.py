@@ -1,17 +1,18 @@
 """Authentication request/response schemas."""
-from pydantic import BaseModel, EmailStr, Field
+from typing import Optional
+from pydantic import BaseModel, Field
 
 
 class UserRegister(BaseModel):
     """User registration request."""
-    email: EmailStr
+    email: str
     password: str = Field(min_length=8, max_length=100)
     full_name: str = Field(min_length=1, max_length=255)
 
 
 class UserLogin(BaseModel):
     """User login request."""
-    email: EmailStr
+    email: str
     password: str
 
 
@@ -27,6 +28,11 @@ class TokenRefresh(BaseModel):
     refresh_token: str
 
 
+class FirebaseAuth(BaseModel):
+    """Firebase authentication request."""
+    id_token: str = Field(description="Firebase ID token from client SDK")
+
+
 class UserResponse(BaseModel):
     """User response."""
     id: int
@@ -34,6 +40,7 @@ class UserResponse(BaseModel):
     full_name: str
     is_active: bool
     is_verified: bool
+    firebase_uid: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -71,13 +71,13 @@ async def create_conversation(
     )
 
     return ConversationResponse(
-        id=conversation.id,
-        child_id=conversation.child_id,
-        thread_id=conversation.thread_id,
-        title=conversation.title,
-        is_active=conversation.is_active,
-        created_at=conversation.created_at.isoformat(),
-        updated_at=conversation.updated_at.isoformat()
+        id=conversation["id"],
+        child_id=conversation["child_id"],
+        thread_id=conversation["thread_id"],
+        title=conversation["title"],
+        is_active=True,
+        created_at=conversation["created_at"],
+        updated_at=conversation["created_at"]
     )
 
 
@@ -182,17 +182,14 @@ async def get_conversation(
             detail="Not authorized to access this conversation"
         )
 
-    # Get messages
+    # Get messages - order by id (more reliable than timestamp)
     messages_result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
-        .order_by(desc(Message.created_at))
+        .order_by(Message.id.asc())
         .limit(limit)
     )
     messages = messages_result.scalars().all()
-
-    # Reverse to show oldest first
-    messages = list(reversed(messages))
 
     return ConversationWithMessages(
         id=conversation.id,
@@ -338,7 +335,7 @@ async def delete_conversation(
         )
 
     # Delete conversation (cascade will delete messages)
-    await db.delete(conversation)
+    db.delete(conversation)
     await db.commit()
 
     return None

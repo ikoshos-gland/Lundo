@@ -1,4 +1,5 @@
 """Agent service for API integration."""
+import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +8,9 @@ from sqlalchemy import select
 from app.agents.supervisor import supervisor
 from app.models.child import Child
 from app.models.conversation import Conversation
-from app.models.message import Message, MessageRole
+from app.models.message import Message
+
+logger = logging.getLogger(__name__)
 
 
 class AgentService:
@@ -61,13 +64,17 @@ class AgentService:
         # Save user message to database
         user_message = Message(
             conversation_id=conversation_id,
-            role=MessageRole.USER,
+            role="user",
             content=content
         )
         db.add(user_message)
-        await db.flush()
+        # Commit user message before workflow to avoid deadlock with AsyncPostgresStore setup
+        # (CREATE INDEX CONCURRENTLY waits for all open transactions)
+        await db.commit()
 
         try:
+            logger.info(f"Processing message for child {child.id}, age {child.age_years}")
+            
             # Process through supervisor agent
             result = await supervisor.process_message(
                 child_id=child.id,
@@ -78,12 +85,14 @@ class AgentService:
                 user_message=content
             )
 
+            logger.info(f"Supervisor returned response successfully")
+
             # Save AI response to database
             ai_message = Message(
                 conversation_id=conversation_id,
-                role=MessageRole.ASSISTANT,
+                role="assistant",
                 content=result["response"],
-                metadata=str(result.get("metadata", {}))  # Store as JSON string
+                extra_data=str(result.get("metadata", {}))  # Store as JSON string
             )
             db.add(ai_message)
 
@@ -101,6 +110,7 @@ class AgentService:
             }
 
         except Exception as e:
+            logger.error(f"Error in supervisor.process_message: {type(e).__name__}: {str(e)}", exc_info=True)
             await db.rollback()
             raise e
 
@@ -146,6 +156,7 @@ class AgentService:
             child_id=child_id,
             thread_id=thread_id,
             title=title,
+            user_id=user_id,
             is_active=True
         )
         db.add(conversation)
@@ -206,22 +217,19 @@ class AgentService:
         if not child or child.parent_id != user_id:
             raise PermissionError("Not authorized to access this conversation")
 
-        # Get messages
+        # Get messages - order by id (more reliable than timestamp)
         result = await db.execute(
             select(Message)
             .where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at.desc())
+            .order_by(Message.id.asc())
             .limit(limit)
         )
         messages = result.scalars().all()
 
-        # Reverse to chronological order
-        messages = list(reversed(messages))
-
         return [
             {
                 "id": msg.id,
-                "role": msg.role.value,
+                "role": msg.role,
                 "content": msg.content,
                 "created_at": msg.created_at.isoformat()
             }

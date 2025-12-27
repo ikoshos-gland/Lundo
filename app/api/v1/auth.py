@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.database.session import get_db
 from app.models.user import User
-from app.schemas.auth import UserRegister, UserLogin, Token, TokenRefresh, UserResponse
+from app.schemas.auth import UserRegister, UserLogin, Token, TokenRefresh, UserResponse, FirebaseAuth
 from app.utils.security import (
     get_password_hash,
     verify_password,
@@ -14,6 +14,7 @@ from app.utils.security import (
     decode_token
 )
 from app.dependencies import get_current_user
+from app.services.firebase import verify_firebase_token, get_firebase_user
 
 router = APIRouter()
 
@@ -191,3 +192,91 @@ async def get_current_user_info(
         User information
     """
     return current_user
+
+
+@router.post("/firebase", response_model=UserResponse)
+async def firebase_auth(
+    auth_data: FirebaseAuth,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Authenticate with Firebase ID token.
+
+    Creates a new user if one doesn't exist, or updates existing user.
+    This endpoint is called after the user signs in with Firebase on the frontend.
+
+    Args:
+        auth_data: Firebase ID token from client
+        db: Database session
+
+    Returns:
+        User information
+
+    Raises:
+        HTTPException: If token is invalid
+    """
+    # Verify the Firebase token
+    claims = verify_firebase_token(auth_data.id_token)
+
+    if not claims:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Firebase token"
+        )
+
+    firebase_uid = claims.get("uid")
+    email = claims.get("email")
+    email_verified = claims.get("email_verified", False)
+    name = claims.get("name", "")
+
+    if not firebase_uid or not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Firebase token missing required claims (uid, email)"
+        )
+
+    # Check if user exists by firebase_uid
+    result = await db.execute(
+        select(User).where(User.firebase_uid == firebase_uid)
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        # Check if user exists by email (for linking accounts)
+        result = await db.execute(
+            select(User).where(User.email == email)
+        )
+        user = result.scalar_one_or_none()
+
+        if user:
+            # Link Firebase to existing account
+            user.firebase_uid = firebase_uid
+            user.is_verified = email_verified
+        else:
+            # Create new user
+            user = User(
+                email=email,
+                full_name=name or email.split("@")[0],
+                firebase_uid=firebase_uid,
+                is_active=True,
+                is_verified=email_verified,
+                hashed_password=None
+            )
+            db.add(user)
+
+        await db.commit()
+        await db.refresh(user)
+    else:
+        # Update verification status if changed
+        if user.is_verified != email_verified:
+            user.is_verified = email_verified
+            await db.commit()
+            await db.refresh(user)
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive"
+        )
+
+    return user

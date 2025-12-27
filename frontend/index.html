@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Child Behavioral Therapist</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+      /* Custom scrollbar for chat */
+      .chat-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .chat-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .chat-scroll::-webkit-scrollbar-thumb {
+        background: #a8a29e;
+        border-radius: 4px;
+      }
+
+      .chat-scroll::-webkit-scrollbar-thumb:hover {
+        background: #78716c;
+      }
+
+      /* Dark mode scrollbar */
+      .dark .chat-scroll::-webkit-scrollbar-thumb {
+        background: #57534e;
+      }
+
+      .dark .chat-scroll::-webkit-scrollbar-thumb:hover {
+        background: #78716c;
+      }
+
+      /* Smooth scroll behavior */
+      html {
+        scroll-behavior: smooth;
+      }
+
+      /* Custom range slider */
+      input[type="range"]::-webkit-slider-thumb {
+        appearance: none;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #d97757;
+        cursor: pointer;
+      }
+
+      input[type="range"]::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #d97757;
+        cursor: pointer;
+        border: none;
+      }
+
+      /* Custom toggle switch */
+      input[type="checkbox"].toggle {
+        appearance: none;
+        width: 48px;
+        height: 24px;
+        background: #e7e5e4;
+        border-radius: 12px;
+        position: relative;
+        cursor: pointer;
+        transition: background 0.3s;
+      }
+
+      input[type="checkbox"].toggle:checked {
+        background: #d97757;
+      }
+
+      input[type="checkbox"].toggle::before {
+        content: '';
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: white;
+        top: 2px;
+        left: 2px;
+        transition: transform 0.3s;
+      }
+
+      input[type="checkbox"].toggle:checked::before {
+        transform: translateX(24px);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

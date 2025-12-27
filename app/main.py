@@ -23,6 +23,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Startup
     logger.info(f"Starting {settings.app_name} in {settings.app_env} mode")
 
+    # Initialize Firebase
+    from app.services.firebase import init_firebase
+    firebase_app = init_firebase()
+    if firebase_app:
+        logger.info("Firebase authentication initialized")
+    else:
+        logger.warning("Firebase not initialized - Firebase auth will not work")
+
     # Initialize database connection pool
     # TODO: Initialize database
 

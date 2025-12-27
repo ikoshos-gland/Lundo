@@ -1,35 +1,61 @@
-FROM python:3.11-slim
+# Build stage
+FROM python:3.11-slim as builder
 
-# Set working directory
 WORKDIR /app
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    postgresql-client \
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY requirements.txt .
-
 # Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
+
+# Production stage
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && addgroup --system --gid 1001 appgroup \
+    && adduser --system --uid 1001 --gid 1001 appuser
+
+# Copy wheels from builder
+COPY --from=builder /app/wheels /wheels
+RUN pip install --no-cache /wheels/*
 
 # Copy application code
-COPY . .
+COPY --chown=appuser:appgroup app/ ./app/
+COPY --chown=appuser:appgroup alembic.ini ./
+COPY --chown=appuser:appgroup scripts/ ./scripts/
 
-# Create data directory
-RUN mkdir -p /app/data/uploads /app/data/chroma
+# Copy Firebase credentials if exists (will be mounted in production)
+COPY --chown=appuser:appgroup firebase-credentials.json* ./
+
+# Create data directories
+RUN mkdir -p /app/data/chroma /app/data/uploads \
+    && chown -R appuser:appgroup /app/data
+
+# Copy entrypoint script
+COPY --chown=appuser:appgroup docker/entrypoint.sh ./
+RUN chmod +x entrypoint.sh
+
+# Switch to non-root user
+USER appuser
 
 # Expose port
 EXPOSE 8080
 
-# Default command (can be overridden in docker-compose)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["./entrypoint.sh"]
+CMD ["api"]

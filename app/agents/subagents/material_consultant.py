@@ -1,8 +1,8 @@
 """Material Consultant subagent - Resource recommendations."""
 from typing import Dict, Any, List
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.tools import tool
-from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_openai import AzureChatOpenAI
+from langchain_core.tools import tool
+from langgraph.prebuilt import create_react_agent
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.config import settings
@@ -147,10 +147,11 @@ Be encouraging and practical - parents need actionable, realistic suggestions.
 
     def __init__(self):
         """Initialize the material consultant."""
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-pro",
-            google_api_key=settings.google_api_key,
-            temperature=0.5  # Balanced for helpful but varied recommendations
+        self.llm = AzureChatOpenAI(
+            azure_deployment=settings.azure_openai_deployment,
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_key=settings.azure_openai_api_key,
+            api_version=settings.azure_openai_api_version
         )
 
         self.tools = [
@@ -159,25 +160,11 @@ Be encouraging and practical - parents need actionable, realistic suggestions.
             search_strategies_tool
         ]
 
-        # Create prompt template
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", self.SYSTEM_PROMPT),
-            ("human", "{input}"),
-            ("placeholder", "{agent_scratchpad}")
-        ])
-
-        # Create agent
-        self.agent = create_tool_calling_agent(
-            llm=self.llm,
+        # Create react agent using LangGraph
+        self.agent = create_react_agent(
+            model=self.llm,
             tools=self.tools,
-            prompt=self.prompt
-        )
-
-        self.executor = AgentExecutor(
-            agent=self.agent,
-            tools=self.tools,
-            verbose=True,
-            max_iterations=5
+            prompt=self.SYSTEM_PROMPT
         )
 
     async def recommend(
@@ -212,10 +199,14 @@ Provide:
 Explain why each recommendation is helpful for this specific issue.
 """
 
-        result = await self.executor.ainvoke({"input": input_text})
+        result = await self.agent.ainvoke({"messages": [("human", input_text)]})
+
+        # Extract the last message content from the agent response
+        last_message = result["messages"][-1]
+        output = last_message.content if hasattr(last_message, 'content') else str(last_message)
 
         return {
-            "recommendations": result["output"],
+            "recommendations": output,
             "child_age": child_age,
             "issue": issue
         }

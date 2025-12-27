@@ -34,6 +34,17 @@ class Settings(BaseSettings):
     langsmith_project: str = Field(default="child-therapist-dev")
     langsmith_tracing: bool = Field(default=False)
 
+    # Azure OpenAI Configuration (Chat)
+    azure_openai_api_key: str = Field(default="")
+    azure_openai_endpoint: str = Field(default="")
+    azure_openai_deployment: str = Field(default="gpt-5.2-chat")
+    azure_openai_api_version: str = Field(default="2024-12-01-preview")
+
+    # Azure OpenAI Configuration (Embeddings)
+    azure_openai_embedding_api_key: str = Field(default="")
+    azure_openai_embedding_endpoint: str = Field(default="")
+    azure_openai_embedding_deployment: str = Field(default="text-embedding-3-large")
+
     # Vector Store
     chroma_host: str = Field(default="localhost")
     chroma_port: int = Field(default=8000)
@@ -44,6 +55,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256")
     access_token_expire_minutes: int = Field(default=60)
     refresh_token_expire_days: int = Field(default=7)
+
+    # Firebase Authentication
+    firebase_credentials_path: str = Field(default="firebase-credentials.json")
+    firebase_project_id: str = Field(default="")
 
     # File Storage
     storage_type: str = Field(default="local")  # local or s3
@@ -78,6 +93,37 @@ class Settings(BaseSettings):
     def chroma_url(self) -> str:
         """Construct Chroma URL."""
         return f"http://{self.chroma_host}:{self.chroma_port}"
+
+    @property
+    def postgres_connection_string(self) -> str:
+        """
+        Convert SQLAlchemy database URL to libpq-style connection string.
+        
+        AsyncPostgresSaver requires libpq format:
+        host=localhost port=5432 dbname=mydb user=postgres password=postgres
+        """
+        from urllib.parse import urlparse
+        
+        # Parse the SQLAlchemy URL
+        # Format: postgresql+asyncpg://user:password@host:port/dbname
+        url = self.database_url.replace("postgresql+asyncpg://", "postgresql://")
+        parsed = urlparse(url)
+        
+        # Build libpq connection string
+        parts = []
+        if parsed.hostname:
+            parts.append(f"host={parsed.hostname}")
+        if parsed.port:
+            parts.append(f"port={parsed.port}")
+        if parsed.path and parsed.path != "/":
+            dbname = parsed.path.lstrip("/")
+            parts.append(f"dbname={dbname}")
+        if parsed.username:
+            parts.append(f"user={parsed.username}")
+        if parsed.password:
+            parts.append(f"password={parsed.password}")
+        
+        return " ".join(parts)
 
 
 # Global settings instance

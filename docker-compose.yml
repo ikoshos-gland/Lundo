@@ -1,32 +1,33 @@
-version: '3.8'
-
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database with pgvector extension
   postgres:
-    image: postgres:15-alpine
-    container_name: child-therapist-db
+    image: pgvector/pgvector:pg15
+    container_name: lundo-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: child_therapist
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-child_therapist}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Redis Cache
+  # Redis Cache & Message Broker
   redis:
     image: redis:7-alpine
-    container_name: child-therapist-redis
-    ports:
-      - "6379:6379"
+    container_name: lundo-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+    ports:
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -34,86 +35,148 @@ services:
       retries: 5
 
   # Chroma Vector Store
-  chroma:
+  chroma_db:
     image: chromadb/chroma:latest
-    container_name: child-therapist-chroma
-    ports:
-      - "8000:8000"
-    volumes:
-      - chroma_data:/chroma/chroma
+    container_name: lundo-chroma-clean
+    restart: unless-stopped
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
+    volumes:
+      - chroma_data:/chroma/chroma
+    ports:
+      - "8000:8000"
 
-  # FastAPI Application (Development)
+  # Main API Service
   api:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: child-therapist-api
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
-    ports:
-      - "8080:8080"
-    volumes:
-      - .:/app
-      - ./data:/app/data
-    env_file:
-      - .env
+    container_name: lundo-api
+    restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/child_therapist
-      - REDIS_URL=redis://redis:6379/0
-      - CHROMA_HOST=chroma
-      - CHROMA_PORT=8000
+      # Application
+      APP_NAME: child-behavioral-therapist
+      APP_ENV: ${APP_ENV:-development}
+      DEBUG: ${DEBUG:-false}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      API_VERSION: v1
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080}
+
+      # Database
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@localhost:5433/${POSTGRES_DB:-child_therapist}
+      REDIS_URL: redis://localhost:6380/0
+
+      # LLM Configuration
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-child-therapist}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+
+      # Azure OpenAI Configuration (Chat)
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-5.2-chat}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-12-01-preview}
+
+      # Azure OpenAI Configuration (Embeddings)
+      AZURE_OPENAI_EMBEDDING_API_KEY: ${AZURE_OPENAI_EMBEDDING_API_KEY}
+      AZURE_OPENAI_EMBEDDING_ENDPOINT: ${AZURE_OPENAI_EMBEDDING_ENDPOINT}
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:-text-embedding-3-large}
+
+      # Vector Store
+      CHROMA_HOST: localhost
+      CHROMA_PORT: 8000
+
+      # Security
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+
+      # Firebase
+      FIREBASE_CREDENTIALS_PATH: /app/firebase-credentials.json
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+
+      # Celery
+      CELERY_BROKER_URL: redis://localhost:6380/1
+      CELERY_RESULT_BACKEND: redis://localhost:6380/2
+
+      # Workers (using 1 to avoid AsyncPostgresStore concurrent index creation issue)
+      WORKERS: ${WORKERS:-1}
+
+      # Seed data on first run
+      SEED_DATA: ${SEED_DATA:-true}
+    volumes:
+      - ./app:/app/app:ro
+      - ./scripts:/app/scripts:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+      - app_data:/app/data
+    # ports:
+    #   - "8080:8080"
+    network_mode: host
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      chroma:
+      chroma_db:
         condition: service_started
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # Celery Worker (Background Tasks)
-  celery-worker:
+  worker:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: child-therapist-celery
-    command: celery -A app.services.celery_app worker --loglevel=info
-    volumes:
-      - .:/app
-    env_file:
-      - .env
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/child_therapist
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-    depends_on:
-      - redis
-      - postgres
+    container_name: lundo-worker
     restart: unless-stopped
+    command: worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@localhost:5433/${POSTGRES_DB:-child_therapist}
+      REDIS_URL: redis://localhost:6380/0
+      CELERY_BROKER_URL: redis://localhost:6380/1
+      CELERY_RESULT_BACKEND: redis://localhost:6380/2
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-5.2-chat}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-12-01-preview}
+      AZURE_OPENAI_EMBEDDING_API_KEY: ${AZURE_OPENAI_EMBEDDING_API_KEY}
+      AZURE_OPENAI_EMBEDDING_ENDPOINT: ${AZURE_OPENAI_EMBEDDING_ENDPOINT}
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:-text-embedding-3-large}
+      FIREBASE_CREDENTIALS_PATH: /app/firebase-credentials.json
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+    volumes:
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+    depends_on:
+      - api
+    profiles:
+      - full
+    network_mode: host
 
   # Flower (Celery Monitoring)
   flower:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    container_name: child-therapist-flower
-    command: celery -A app.services.celery_app flower --port=5555
+    image: mher/flower:2.0
+    container_name: lundo-flower
+    restart: unless-stopped
+    command: celery --broker=redis://redis:6379/1 flower --port=5555
     ports:
       - "5555:5555"
-    env_file:
-      - .env
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
     depends_on:
       - redis
-      - celery-worker
-    restart: unless-stopped
+    profiles:
+      - full
 
 volumes:
   postgres_data:
   redis_data:
   chroma_data:
+  app_data:
+
+networks:
+  default:
+    name: lundo-network

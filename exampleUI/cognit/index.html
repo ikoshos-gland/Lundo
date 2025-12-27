@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cognit - Friendly AI for Psychology</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              warm: {
+                50: '#fafaf9',
+                100: '#f5f5f4',
+                200: '#e7e5e4',
+                300: '#d6d3d1',
+                400: '#a8a29e',
+                500: '#78716c',
+                600: '#57534e',
+                700: '#44403c',
+                800: '#292524',
+                900: '#1c1917',
+                950: '#0c0a09',
+              },
+            },
+            fontFamily: {
+              sans: ['Outfit', 'sans-serif'],
+            },
+            animation: {
+              blob: "blob 10s infinite",
+              float: "float 6s ease-in-out infinite",
+            },
+            keyframes: {
+              blob: {
+                "0%": {
+                  transform: "translate(0px, 0px) scale(1)",
+                },
+                "33%": {
+                  transform: "translate(30px, -50px) scale(1.1)",
+                },
+                "66%": {
+                  transform: "translate(-20px, 20px) scale(0.9)",
+                },
+                "100%": {
+                  transform: "translate(0px, 0px) scale(1)",
+                },
+              },
+              float: {
+                "0%, 100%": {
+                  transform: "translateY(0)",
+                },
+                "50%": {
+                  transform: "translateY(-10px)",
+                },
+              }
+            },
+          },
+        },
+      };
+    </script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family: 'Outfit', sans-serif;
+      }
+
+      /* Custom Scrollbar for Chat */
+      .chat-scroll::-webkit-scrollbar {
+        width: 5px;
+      }
+      .chat-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .chat-scroll::-webkit-scrollbar-thumb {
+        background: #e7e5e4;
+        border-radius: 10px;
+      }
+      .dark .chat-scroll::-webkit-scrollbar-thumb {
+        background: #44403c;
+      }
+      .chat-scroll::-webkit-scrollbar-thumb:hover {
+        background: #d6d3d1;
+      }
+      .dark .chat-scroll::-webkit-scrollbar-thumb:hover {
+        background: #57534e;
+      }
+
+      /* Custom Range Slider */
+      input[type='range'] {
+        -webkit-appearance: none;
+        width: 100%;
+        background: transparent;
+      }
+      input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        height: 20px;
+        width: 20px;
+        border-radius: 50%;
+        background: #d97757;
+        cursor: pointer;
+        margin-top: -8px;
+        box-shadow: 0 2px 6px rgba(217, 119, 87, 0.3);
+        border: 2px solid white;
+      }
+      .dark input[type='range']::-webkit-slider-thumb {
+        border-color: #292524;
+      }
+      input[type='range']::-webkit-slider-runnable-track {
+        width: 100%;
+        height: 4px;
+        cursor: pointer;
+        background: #e7e5e4;
+        border-radius: 999px;
+      }
+      .dark input[type='range']::-webkit-slider-runnable-track {
+        background: #44403c;
+      }
+
+      /* Toggle Switch */
+      .toggle-checkbox:checked {
+          right: 0;
+          border-color: #d97757;
+      }
+      .toggle-checkbox:checked + .toggle-label {
+          background-color: #d97757;
+      }
+
+      /* Animation Utility Classes */
+      .animation-delay-2000 {
+        animation-delay: 2s;
+      }
+      .animation-delay-4000 {
+        animation-delay: 4s;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body
+    class="bg-[#fdfcf8] dark:bg-[#0c0a09] text-[#57534e] dark:text-[#d6d3d1] antialiased selection:bg-[#d97757] selection:text-white overflow-x-hidden transition-colors duration-300"
+  >
+    <!-- Dynamic Animated Background -->
+    <div class="fixed inset-0 -z-10 h-full w-full bg-[#fdfcf8] dark:bg-[#0c0a09] transition-colors duration-300 overflow-hidden">
+        
+        <!-- Light Mode Blobs -->
+        <div class="absolute inset-0 opacity-100 dark:opacity-0 transition-opacity duration-700">
+             <div class="absolute top-0 -left-4 w-96 h-96 bg-[#fed7aa] rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
+             <div class="absolute top-0 -right-4 w-96 h-96 bg-[#ffedd5] rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
+             <div class="absolute -bottom-32 left-20 w-96 h-96 bg-[#e7e5e4] rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
+             <div class="absolute bottom-40 right-10 w-80 h-80 bg-[#ffdbd0] rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
+        </div>
+
+        <!-- Dark Mode Blobs -->
+        <div class="absolute inset-0 opacity-0 dark:opacity-100 transition-opacity duration-700">
+             <div class="absolute top-0 -left-4 w-96 h-96 bg-[#292524] rounded-full mix-blend-screen filter blur-[100px] opacity-20 animate-blob"></div>
+             <div class="absolute top-0 -right-4 w-96 h-96 bg-[#431407] rounded-full mix-blend-screen filter blur-[100px] opacity-10 animate-blob animation-delay-2000"></div>
+             <div class="absolute -bottom-32 left-20 w-96 h-96 bg-[#1c1917] rounded-full mix-blend-screen filter blur-[100px] opacity-30 animate-blob animation-delay-4000"></div>
+        </div>
+
+    </div>
+
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

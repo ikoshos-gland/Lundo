@@ -1,7 +1,7 @@
 """Message database model."""
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, Integer, Text, ForeignKey, Enum as SQLEnum
+from sqlalchemy import String, Integer, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
@@ -26,7 +26,7 @@ class Message(Base):
         conversation_id: Foreign key to Conversation
         role: Message role (user/assistant/system)
         content: Message content
-        metadata: JSON metadata (agent traces, tool calls, etc.)
+        extra_data: JSON metadata (agent traces, tool calls, etc.)
         conversation: Relationship to Conversation
     """
 
@@ -38,12 +38,12 @@ class Message(Base):
         nullable=False,
         index=True
     )
-    role: Mapped[MessageRole] = mapped_column(
-        SQLEnum(MessageRole, name="message_role"),
+    role: Mapped[str] = mapped_column(
+        String(50),
         nullable=False
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string
+    extra_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string
 
     # Relationships
     conversation: Mapped["Conversation"] = relationship(

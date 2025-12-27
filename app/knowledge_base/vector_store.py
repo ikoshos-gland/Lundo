@@ -3,7 +3,7 @@ import os
 from typing import List, Dict, Any, Optional
 import chromadb
 from chromadb.config import Settings
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_openai import AzureOpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 
@@ -21,11 +21,13 @@ class KnowledgeBaseVectorStore:
     """
 
     def __init__(self):
-        """Initialize vector store with Chroma and Gemini embeddings."""
+        """Initialize vector store with Chroma and Azure OpenAI embeddings."""
         # Initialize embeddings
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            google_api_key=settings.google_api_key
+        self.embeddings = AzureOpenAIEmbeddings(
+            azure_deployment=settings.azure_openai_embedding_deployment,
+            azure_endpoint=settings.azure_openai_embedding_endpoint,
+            api_key=settings.azure_openai_embedding_api_key,
+            api_version="2024-12-01-preview"
         )
 
         # Initialize Chroma client
@@ -62,6 +64,10 @@ class KnowledgeBaseVectorStore:
             embedding_function=self.embeddings
         )
 
+    async def initialize(self):
+        """Alias for initialize_collections for backwards compatibility."""
+        await self.initialize_collections()
+
     async def add_books(self, books: List[Dict[str, Any]]):
         """
         Add books to the vector store.
@@ -94,6 +100,10 @@ class KnowledgeBaseVectorStore:
         if self.books_store and documents:
             await self.books_store.aadd_documents(documents)
 
+    async def add_book(self, book: Dict[str, Any]):
+        """Add a single book to the vector store."""
+        await self.add_books([book])
+
     async def add_activities(self, activities: List[Dict[str, Any]]):
         """
         Add activities to the vector store.
@@ -120,6 +130,10 @@ class KnowledgeBaseVectorStore:
         if self.activities_store and documents:
             await self.activities_store.aadd_documents(documents)
 
+    async def add_activity(self, activity: Dict[str, Any]):
+        """Add a single activity to the vector store."""
+        await self.add_activities([activity])
+
     async def add_strategies(self, strategies: List[Dict[str, Any]]):
         """
         Add parenting strategies to the vector store.
@@ -145,6 +159,10 @@ class KnowledgeBaseVectorStore:
 
         if self.strategies_store and documents:
             await self.strategies_store.aadd_documents(documents)
+
+    async def add_strategy(self, strategy: Dict[str, Any]):
+        """Add a single strategy to the vector store."""
+        await self.add_strategies([strategy])
 
     async def search_books(
         self,

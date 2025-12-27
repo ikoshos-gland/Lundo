@@ -1,7 +1,7 @@
 """Workflow nodes for the behavioral therapist system."""
 from typing import Dict, Any
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import AzureChatOpenAI
 
 from app.config import settings
 from app.workflow.state import TherapistState
@@ -12,10 +12,11 @@ from app.agents.skills.behaviorist import behaviorist_skill
 
 
 # Initialize LLM for routing and synthesis
-llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-pro",
-    google_api_key=settings.google_api_key,
-    temperature=0.7
+llm = AzureChatOpenAI(
+    azure_deployment=settings.azure_openai_deployment,
+    azure_endpoint=settings.azure_openai_endpoint,
+    api_key=settings.azure_openai_api_key,
+    api_version=settings.azure_openai_api_version
 )
 
 
@@ -234,6 +235,9 @@ async def synthesize_response(state: TherapistState) -> Dict[str, Any]:
 
     Node: Final synthesis.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     # Build synthesis prompt
     synthesis_prompt = f"""
 You are an empathetic child behavioral therapist assistant. Synthesize the following
@@ -272,10 +276,17 @@ Be specific and practical. Aim for 4-6 paragraphs.
 {"⚠️ IMPORTANT: Include a disclaimer to consult a professional for serious concerns." if state.get('requires_human_review') else ""}
 """
 
-    response = await llm.ainvoke(synthesis_prompt)
+    try:
+        response = await llm.ainvoke(synthesis_prompt)
+        synthesized_content = response.content if response and response.content else None
 
-    # Save synthesized response (will be checked by safety_check node)
-    synthesized_content = response.content
+        if not synthesized_content:
+            logger.warning("[WORKFLOW] LLM returned empty response in synthesize_response")
+            synthesized_content = "I understand you're reaching out about your child. While I'm processing your concern, I want you to know that your attentiveness as a parent is valuable. Could you please share a bit more detail so I can provide more specific guidance?"
+
+    except Exception as e:
+        logger.error(f"[WORKFLOW] Error in synthesize_response LLM call: {e}")
+        synthesized_content = "I apologize, but I'm having trouble processing your message right now. Please try again in a moment, or rephrase your question. Your concern is important to me."
 
     return {
         **state,
@@ -294,8 +305,21 @@ async def format_output(state: TherapistState) -> Dict[str, Any]:
 
     Node: Output formatting.
     """
-    # Use filtered response from safety check
-    final_content = state.get("filtered_response", state.get("synthesized_response", ""))
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Debug logging
+    logger.info(f"[FORMAT_OUTPUT] filtered_response: {state.get('filtered_response')[:100] if state.get('filtered_response') else None}")
+    logger.info(f"[FORMAT_OUTPUT] synthesized_response: {state.get('synthesized_response')[:100] if state.get('synthesized_response') else None}")
+
+    # Use filtered response from safety check (handle None explicitly)
+    final_content = (
+        state.get("filtered_response")
+        or state.get("synthesized_response")
+        or "I apologize, but I encountered an issue processing your message. Please try again."
+    )
+
+    logger.info(f"[FORMAT_OUTPUT] final_content: {final_content[:100] if final_content else None}")
 
     # Create AI message with the safety-checked response
     ai_message = AIMessage(content=final_content)
