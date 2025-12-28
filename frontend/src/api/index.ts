@@ -4,4 +4,16 @@ export type { LoginCredentials, RegisterData, TokenResponse, UserResponse, Fireb
 export { childrenApi } from './children';
 export type { Child, ChildCreate, ChildUpdate } from './children';
 export { conversationsApi } from './conversations';
-export type { Conversation, Message, ConversationCreate, SendMessageRequest, SendMessageResponse } from './conversations';
+export type {
+    Conversation,
+    Message,
+    ConversationCreate,
+    SendMessageRequest,
+    SendMessageResponse,
+    ExplorationPhase,
+    QuestionAnswer,
+    ExplorationStatus,
+    ExplorationQuestionEvent,
+    ExplorationCompleteEvent,
+    StreamEvent
+} from './conversations';

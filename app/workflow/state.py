@@ -1,7 +1,16 @@
 """Workflow state definition for LangGraph."""
-from typing import TypedDict, Annotated, Sequence, Optional, Dict, Any
+from typing import TypedDict, Annotated, Sequence, Optional, Dict, Any, List
+from enum import Enum
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+
+
+class ExplorationPhase(str, Enum):
+    """Exploration workflow phases."""
+    NOT_STARTED = "not_started"
+    EXPLORATION_QUESTIONS = "exploration_questions"
+    DEEP_QUESTIONS = "deep_questions"
+    COMPLETED = "completed"
 
 
 class TherapistState(TypedDict):
@@ -51,6 +60,16 @@ class TherapistState(TypedDict):
     conversation_id: int
     thread_id: str
     session_notes: Dict[str, Any]
+
+    # Exploration phase tracking
+    exploration_phase: str  # ExplorationPhase value
+    exploration_question_index: int  # 0-4 for each phase
+    exploration_qa: List[Dict[str, str]]  # [{"question": "...", "answer": "..."}]
+    deep_qa: List[Dict[str, str]]  # [{"question": "...", "answer": "..."}]
+    initial_concern: str  # The triggering concern that started exploration
+    exploration_topic_id: Optional[str]  # UUID linking Q&A to specific topic
+    current_question: Optional[str]  # Current question being asked
+    current_question_type: Optional[str]  # "exploration" or "deep"
 
 
 class AgentResponse(TypedDict):

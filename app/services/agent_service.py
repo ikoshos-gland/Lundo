@@ -1,6 +1,6 @@
 """Agent service for API integration."""
 import logging
-from typing import Dict, Any, Optional, AsyncGenerator
+from typing import Dict, Any, Optional, AsyncGenerator, Union
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -13,6 +13,12 @@ from app.models.child import Child
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.config import settings
+from app.services.exploration_service import exploration_service
+from app.schemas.exploration import (
+    ExplorationPhase,
+    QuestionResponse,
+    ExplorationCompleteResponse
+)
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +217,9 @@ class AgentService:
         """
         Send a message and stream AI response token by token.
 
+        Handles exploration phase routing - if exploration is active or should
+        be triggered, routes to exploration flow instead of main workflow.
+
         Args:
             db: Database session
             conversation_id: Conversation ID
@@ -222,6 +231,8 @@ class AgentService:
             - {"type": "token", "data": {"content": "..."}}
             - {"type": "metadata", "data": {...}}
             - {"type": "done", "data": {...}}
+            - {"type": "exploration_question", "data": {...}}
+            - {"type": "exploration_complete", "data": {...}}
         """
         # Get conversation with child info
         result = await db.execute(
@@ -241,7 +252,36 @@ class AgentService:
         if not child or child.parent_id != user_id:
             raise PermissionError("Not authorized to access this conversation")
 
-        # Save user message to database
+        # Check exploration status
+        exploration_status = await exploration_service.get_exploration_status(
+            db, conversation_id
+        )
+
+        # If in exploration phase, this message is an answer
+        if exploration_status.phase in [
+            ExplorationPhase.EXPLORATION_QUESTIONS,
+            ExplorationPhase.DEEP_QUESTIONS
+        ]:
+            async for event in self._handle_exploration_answer(
+                db, conversation_id, child, content
+            ):
+                yield event
+            return
+
+        # Check if we should trigger exploration for new topic
+        should_explore, topic_summary = await exploration_service.should_trigger_exploration(
+            db, conversation_id, content
+        )
+
+        if should_explore:
+            # Start exploration phase
+            async for event in self._start_exploration(
+                db, conversation_id, child.id, content
+            ):
+                yield event
+            return
+
+        # Normal workflow - save user message first
         user_message = Message(
             conversation_id=conversation_id,
             role="user",
@@ -252,6 +292,11 @@ class AgentService:
 
         try:
             logger.info(f"Processing streaming message for child {child.id}, age {child.age_years}")
+
+            # Get exploration context to enrich the workflow
+            exploration_context = await exploration_service.get_exploration_context_for_workflow(
+                db, conversation_id
+            )
 
             # Collect the full response for saving
             full_response = ""
@@ -264,7 +309,8 @@ class AgentService:
                 parent_id=user_id,
                 conversation_id=conversation_id,
                 thread_id=conversation.thread_id,
-                user_message=content
+                user_message=content,
+                exploration_context=exploration_context  # Pass exploration context
             ):
                 event_type = event.get("type")
 
@@ -329,6 +375,121 @@ class AgentService:
             logger.error(f"Error in streaming: {type(e).__name__}: {str(e)}", exc_info=True)
             await db.rollback()
             raise e
+
+    async def _start_exploration(
+        self,
+        db: AsyncSession,
+        conversation_id: int,
+        child_id: int,
+        initial_concern: str
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Start exploration phase and yield first question.
+
+        Args:
+            db: Database session
+            conversation_id: Conversation ID
+            child_id: Child ID
+            initial_concern: The parent's initial concern
+
+        Yields:
+            exploration_question event with first question
+        """
+        logger.info(f"[EXPLORATION] Starting exploration for conversation {conversation_id}")
+
+        try:
+            # Start exploration and get first question
+            question_response = await exploration_service.start_exploration(
+                db, conversation_id, child_id, initial_concern
+            )
+
+            yield {
+                "type": "exploration_question",
+                "data": {
+                    "question": question_response.question,
+                    "question_number": question_response.question_number,
+                    "question_type": question_response.question_type,
+                    "phase": question_response.phase.value,
+                    "is_last_question": question_response.is_last_question,
+                    "topic_id": question_response.topic_id
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error starting exploration: {e}", exc_info=True)
+            raise
+
+    async def _handle_exploration_answer(
+        self,
+        db: AsyncSession,
+        conversation_id: int,
+        child: Child,
+        answer: str
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Handle an answer during exploration phase.
+
+        Args:
+            db: Database session
+            conversation_id: Conversation ID
+            child: Child model instance
+            answer: User's answer
+
+        Yields:
+            exploration_question or exploration_complete event
+        """
+        logger.info(f"[EXPLORATION] Processing answer for conversation {conversation_id}")
+
+        try:
+            # Submit answer and get next question or completion
+            result = await exploration_service.submit_answer(
+                db, conversation_id, answer
+            )
+
+            if isinstance(result, QuestionResponse):
+                # More questions to ask
+                yield {
+                    "type": "exploration_question",
+                    "data": {
+                        "question": result.question,
+                        "question_number": result.question_number,
+                        "question_type": result.question_type,
+                        "phase": result.phase.value,
+                        "is_last_question": result.is_last_question,
+                        "topic_id": result.topic_id
+                    }
+                }
+            elif isinstance(result, ExplorationCompleteResponse):
+                # Exploration complete
+                yield {
+                    "type": "exploration_complete",
+                    "data": {
+                        "exploration_qa": [
+                            {
+                                "question": qa.question,
+                                "answer": qa.answer,
+                                "question_type": qa.question_type,
+                                "question_number": qa.question_number
+                            }
+                            for qa in result.exploration_qa
+                        ],
+                        "deep_qa": [
+                            {
+                                "question": qa.question,
+                                "answer": qa.answer,
+                                "question_type": qa.question_type,
+                                "question_number": qa.question_number
+                            }
+                            for qa in result.deep_qa
+                        ],
+                        "initial_concern": result.initial_concern,
+                        "topic_id": result.topic_id
+                    }
+                }
+
+        except Exception as e:
+            logger.error(f"Error handling exploration answer: {e}", exc_info=True)
+            raise
 
     async def create_conversation(
         self,

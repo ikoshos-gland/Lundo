@@ -174,7 +174,8 @@ async def run_therapist_workflow_streaming(
     parent_id: int,
     conversation_id: int,
     thread_id: str,
-    user_message: str
+    user_message: str,
+    exploration_context: Dict[str, Any] = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Run the therapist workflow with streaming synthesis.
@@ -188,6 +189,7 @@ async def run_therapist_workflow_streaming(
         conversation_id: Conversation database ID
         thread_id: LangGraph thread ID for state persistence
         user_message: Parent's message
+        exploration_context: Optional context from exploration phase
 
     Yields:
         Events: analysis_complete, token, done
@@ -218,7 +220,16 @@ async def run_therapist_workflow_streaming(
         "final_response": None,
         "requires_human_review": False,
         "safety_flags": [],
-        "session_notes": {}
+        "session_notes": {},
+        # Exploration context
+        "exploration_phase": "completed" if exploration_context else "not_started",
+        "exploration_question_index": 0,
+        "exploration_qa": exploration_context.get("exploration_qa", []) if exploration_context else [],
+        "deep_qa": exploration_context.get("deep_qa", []) if exploration_context else [],
+        "initial_concern": exploration_context.get("initial_concern", "") if exploration_context else "",
+        "exploration_topic_id": None,
+        "current_question": None,
+        "current_question_type": None
     }
 
     try:

@@ -7,8 +7,9 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Layout } from '../../components/layout';
 import { Button, Card } from '../../components/ui';
-import { childrenApi, conversationsApi, Child, Conversation, Message } from '../../api';
+import { childrenApi, conversationsApi, Child, Conversation, Message, ExplorationQuestionEvent } from '../../api';
 import ConfirmationModal from '../../components/ui/ConfirmationModal';
+import { QuestionCard, ExplorationProgress } from './components';
 import {
     Send,
     ArrowLeft,
@@ -818,6 +819,11 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
 
+    // Exploration mode state
+    const [isExplorationMode, setIsExplorationMode] = useState(false);
+    const [currentQuestion, setCurrentQuestion] = useState<ExplorationQuestionEvent | null>(null);
+    const [explorationProgress, setExplorationProgress] = useState(0);
+
     // Load initial data
     useEffect(() => {
         const loadData = async () => {
@@ -946,6 +952,21 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
                             )
                         );
                     }
+                } else if (event.type === 'exploration_question') {
+                    // Enter exploration mode with the question
+                    setIsExplorationMode(true);
+                    setCurrentQuestion(event.data);
+                    setExplorationProgress(event.data.question_number);
+                    // Remove the placeholder messages since we're in exploration mode
+                    setMessages(prev => prev.filter(m =>
+                        m.id !== tempUserMessage.id && m.id !== streamingMessageId
+                    ));
+                } else if (event.type === 'exploration_complete') {
+                    // Exit exploration mode
+                    setIsExplorationMode(false);
+                    setCurrentQuestion(null);
+                    setExplorationProgress(0);
+                    // The main workflow will now run automatically
                 } else if (event.type === 'error') {
                     console.error('Stream error:', event.data.error);
                     throw new Error(event.data.error);
@@ -961,6 +982,44 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
         } finally {
             setIsSending(false);
             setIsStreaming(false);
+        }
+    };
+
+    // Handle exploration answer submission
+    const submitExplorationAnswer = async (answer: string) => {
+        if (!activeConversation || isSending) return;
+
+        setIsSending(true);
+
+        try {
+            for await (const event of conversationsApi.submitExplorationAnswer(
+                activeConversation.id,
+                answer
+            )) {
+                if (event.type === 'exploration_question') {
+                    // Show next question
+                    setCurrentQuestion(event.data);
+                    setExplorationProgress(event.data.question_number);
+                } else if (event.type === 'exploration_complete') {
+                    // Exit exploration mode - main workflow will run
+                    setIsExplorationMode(false);
+                    setCurrentQuestion(null);
+                    setExplorationProgress(0);
+
+                    // Now send a message to trigger the main workflow
+                    // The exploration context is already saved, just need to trigger analysis
+                    setIsSending(false);
+                    await sendMessage(event.data.initial_concern);
+                    return;
+                } else if (event.type === 'error') {
+                    console.error('Exploration error:', event.data.error);
+                    throw new Error(event.data.error);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to submit exploration answer:', error);
+        } finally {
+            setIsSending(false);
         }
     };
 
@@ -1263,54 +1322,78 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
                                         </motion.div>
                                     )}
 
-                                    {/* Messages */}
-                                    {messages.map((message, index) => (
-                                        <MessageBubble
-                                            key={message.id}
-                                            message={message}
-                                            isLatestAssistant={
-                                                message.role === 'assistant' &&
-                                                index === messages.length - 1
-                                            }
-                                            isStreaming={isStreaming}
-                                            onCopy={() => { }}
-                                            onRegenerate={
-                                                message.role === 'assistant' && index === messages.length - 1
-                                                    ? () => {
-                                                        const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-                                                        if (lastUserMsg) {
-                                                            setMessages(prev => prev.slice(0, -1));
-                                                            sendMessage(lastUserMsg.content);
-                                                        }
+                                    {/* Exploration Mode UI */}
+                                    {isExplorationMode && currentQuestion ? (
+                                        <>
+                                            <ExplorationProgress
+                                                currentQuestion={currentQuestion.question_number}
+                                                totalQuestions={10}
+                                                phase={currentQuestion.question_type}
+                                            />
+                                            <div className="flex-1 flex items-center justify-center">
+                                                <QuestionCard
+                                                    question={currentQuestion.question}
+                                                    questionNumber={currentQuestion.question_number}
+                                                    questionType={currentQuestion.question_type}
+                                                    onSubmit={submitExplorationAnswer}
+                                                    isSubmitting={isSending}
+                                                />
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            {/* Messages */}
+                                            {messages.map((message, index) => (
+                                                <MessageBubble
+                                                    key={message.id}
+                                                    message={message}
+                                                    isLatestAssistant={
+                                                        message.role === 'assistant' &&
+                                                        index === messages.length - 1
                                                     }
-                                                    : undefined
-                                            }
-                                            onFeedback={(type) => console.log(`Feedback: ${type} for message ${message.id}`)}
-                                        />
-                                    ))}
+                                                    isStreaming={isStreaming}
+                                                    onCopy={() => { }}
+                                                    onRegenerate={
+                                                        message.role === 'assistant' && index === messages.length - 1
+                                                            ? () => {
+                                                                const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+                                                                if (lastUserMsg) {
+                                                                    setMessages(prev => prev.slice(0, -1));
+                                                                    sendMessage(lastUserMsg.content);
+                                                                }
+                                                            }
+                                                            : undefined
+                                                    }
+                                                    onFeedback={(type) => console.log(`Feedback: ${type} for message ${message.id}`)}
+                                                />
+                                            ))}
 
-                                    {/* Typing Indicator */}
-                                    <AnimatePresence>
-                                        {isSending && <TypingIndicator />}
-                                    </AnimatePresence>
+                                            {/* Typing Indicator */}
+                                            <AnimatePresence>
+                                                {isSending && <TypingIndicator />}
+                                            </AnimatePresence>
+                                        </>
+                                    )}
 
                                     <div ref={messagesEndRef} />
                                 </div>
 
-                                {/* Input Area */}
-                                <div className="p-4 sm:p-6 border-t border-warm-100 dark:border-warm-800 bg-white/80 dark:bg-warm-900/80 backdrop-blur-sm">
-                                    <ChatInput
-                                        value={inputMessage}
-                                        onChange={setInputMessage}
-                                        onSubmit={() => sendMessage()}
-                                        disabled={isSending}
-                                        placeholder={`Ask anything about ${getChildName(activeConversation.child_id)}...`}
-                                    />
-                                    <div className="flex items-center justify-center gap-2 mt-3 text-xs text-warm-400 dark:text-warm-500">
-                                        <Sparkles className="w-3 h-3" />
-                                        <span>AI responses are for informational purposes. Consult professionals for medical advice.</span>
+                                {/* Input Area - hide during exploration */}
+                                {!isExplorationMode && (
+                                    <div className="p-4 sm:p-6 border-t border-warm-100 dark:border-warm-800 bg-white/80 dark:bg-warm-900/80 backdrop-blur-sm">
+                                        <ChatInput
+                                            value={inputMessage}
+                                            onChange={setInputMessage}
+                                            onSubmit={() => sendMessage()}
+                                            disabled={isSending}
+                                            placeholder={`Ask anything about ${getChildName(activeConversation.child_id)}...`}
+                                        />
+                                        <div className="flex items-center justify-center gap-2 mt-3 text-xs text-warm-400 dark:text-warm-500">
+                                            <Sparkles className="w-3 h-3" />
+                                            <span>AI responses are for informational purposes. Consult professionals for medical advice.</span>
+                                        </div>
                                     </div>
-                                </div>
+                                )}
                             </>
                         )}
                     </div>

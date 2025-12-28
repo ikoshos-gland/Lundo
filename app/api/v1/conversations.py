@@ -20,8 +20,13 @@ from app.schemas.conversation import (
     MessageResponse,
     MessageSendResponse
 )
+from app.schemas.exploration import (
+    ExplorationStatus,
+    AnswerSubmit
+)
 from app.dependencies import get_current_user
 from app.services.agent_service import AgentService
+from app.services.exploration_service import exploration_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -432,3 +437,150 @@ async def delete_conversation(
     await db.commit()
 
     return None
+
+
+# ============================================================================
+# Exploration Phase Endpoints
+# ============================================================================
+
+
+@router.get("/{conversation_id}/exploration/status", response_model=ExplorationStatus)
+async def get_exploration_status(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get current exploration phase status.
+
+    Returns the exploration phase state including:
+    - Current phase (not_started, exploration_questions, deep_questions, completed)
+    - Current question number (1-10)
+    - Current question text (if in exploration phase)
+    - All Q&A history for this topic
+
+    Args:
+        conversation_id: Conversation ID
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        ExplorationStatus with phase and Q&A history
+    """
+    # Get conversation and verify ownership
+    result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
+    )
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+
+    # Verify ownership through child
+    child_result = await db.execute(
+        select(Child).where(Child.id == conversation.child_id)
+    )
+    child = child_result.scalar_one_or_none()
+
+    if not child or child.parent_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation"
+        )
+
+    try:
+        status_data = await exploration_service.get_exploration_status(
+            db, conversation_id
+        )
+        return status_data
+    except Exception as e:
+        logger.error(f"Error getting exploration status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting exploration status: {str(e)}"
+        )
+
+
+@router.post("/{conversation_id}/exploration/answer")
+async def submit_exploration_answer(
+    conversation_id: int,
+    answer_data: AnswerSubmit,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Submit answer to current exploration question.
+
+    Processes the user's answer and returns either:
+    - Next question (if more questions remain)
+    - Exploration complete status (if all 10 questions answered)
+
+    This endpoint streams the response using SSE with events:
+    - exploration_question: Next question data
+    - exploration_complete: All Q&A data when done
+
+    Args:
+        conversation_id: Conversation ID
+        answer_data: User's answer
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        StreamingResponse with SSE events
+    """
+    # Get conversation and verify ownership
+    result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
+    )
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+
+    # Verify ownership through child
+    child_result = await db.execute(
+        select(Child).where(Child.id == conversation.child_id)
+    )
+    child = child_result.scalar_one_or_none()
+
+    if not child or child.parent_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation"
+        )
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        """Generate SSE events for exploration answer processing."""
+        agent_service = AgentService()
+
+        try:
+            async for event in agent_service._handle_exploration_answer(
+                db=db,
+                conversation_id=conversation_id,
+                child=child,
+                answer=answer_data.answer
+            ):
+                event_type = event.get("type", "exploration_question")
+                data = json.dumps(event.get("data", {}))
+                yield f"event: {event_type}\ndata: {data}\n\n"
+
+        except Exception as e:
+            logger.error(f"Exploration answer error: {str(e)}", exc_info=True)
+            error_data = json.dumps({"error": str(e)})
+            yield f"event: error\ndata: {error_data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )

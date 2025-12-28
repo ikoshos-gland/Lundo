@@ -9,6 +9,7 @@ from app.database.base import Base
 if TYPE_CHECKING:
     from app.models.child import Child
     from app.models.message import Message
+    from app.models.exploration_qa import ExplorationQA
 
 
 class Conversation(Base):
@@ -49,6 +50,17 @@ class Conversation(Base):
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # Exploration phase tracking
+    exploration_phase: Mapped[str] = mapped_column(
+        String(50),
+        default="not_started",
+        nullable=False
+    )  # not_started, exploration_questions, deep_questions, completed
+    current_exploration_topic_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True
+    )  # UUID for current exploration topic
+
     # Relationships
     child: Mapped["Child"] = relationship("Child", back_populates="conversations")
     messages: Mapped[List["Message"]] = relationship(
@@ -56,6 +68,12 @@ class Conversation(Base):
         back_populates="conversation",
         cascade="all, delete-orphan",
         order_by="Message.created_at"
+    )
+    exploration_qa: Mapped[List["ExplorationQA"]] = relationship(
+        "ExplorationQA",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="ExplorationQA.question_number"
     )
 
     def __repr__(self) -> str:
