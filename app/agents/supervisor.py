@@ -1,11 +1,11 @@
 """Supervisor Agent - Main orchestrator for the therapist system."""
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, AsyncGenerator
 from datetime import datetime
 from pydantic import BaseModel, Field
 
 from langchain_openai import AzureChatOpenAI
 
-from app.workflow.graph import run_therapist_workflow
+from app.workflow.graph import run_therapist_workflow, run_therapist_workflow_streaming
 from app.memory.schemas import ChildMemory, add_behavioral_pattern, add_timeline_event
 from app.config import settings
 
@@ -149,6 +149,84 @@ class SupervisorAgent:
                 "timestamp": datetime.now().isoformat()
             }
         }
+
+    async def process_message_stream(
+        self,
+        child_id: int,
+        child_age: int,
+        parent_id: int,
+        conversation_id: int,
+        thread_id: str,
+        user_message: str
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Process a parent's message with streaming response.
+
+        Runs the analysis workflow first (non-streaming), then streams
+        the synthesis response token by token.
+
+        Args:
+            child_id: Child's database ID
+            child_age: Child's age in years
+            parent_id: Parent's database ID
+            conversation_id: Conversation database ID
+            thread_id: LangGraph thread ID
+            user_message: Parent's message
+
+        Yields:
+            Dictionary with event type and content:
+            - {"type": "analysis_complete"}: Analysis phase done
+            - {"type": "token", "content": "..."}: Response token
+            - {"type": "done", "metadata": {...}}: Stream complete
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Run the streaming workflow
+        full_response = ""
+        async for event in run_therapist_workflow_streaming(
+            child_id=child_id,
+            child_age=child_age,
+            parent_id=parent_id,
+            conversation_id=conversation_id,
+            thread_id=thread_id,
+            user_message=user_message
+        ):
+            event_type = event.get("type")
+
+            if event_type == "analysis_complete":
+                # Notify that analysis is done, synthesis starting
+                yield {"type": "analysis_complete"}
+
+            elif event_type == "token":
+                # Stream token
+                token = event.get("content", "")
+                full_response += token
+                yield {"type": "token", "content": token}
+
+            elif event_type == "done":
+                # Get final state for metadata
+                final_state = event.get("state", {})
+
+                # Update long-term memory if needed
+                await self._update_memory_from_conversation(
+                    child_id=child_id,
+                    concern=final_state.get("current_concern", ""),
+                    behavior_analysis=final_state.get("behavior_analysis", ""),
+                    child_age=child_age
+                )
+
+                yield {
+                    "type": "done",
+                    "metadata": {
+                        "requires_human_review": final_state.get("requires_human_review", False),
+                        "safety_flags": final_state.get("safety_flags", []),
+                        "agents_called": final_state.get("agents_to_call", []),
+                        "skills_used": final_state.get("active_skills", []),
+                        "parent_emotional_state": final_state.get("parent_emotional_state"),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                }
 
     async def _update_memory_from_conversation(
         self,

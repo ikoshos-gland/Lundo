@@ -65,7 +65,7 @@
 
     /* Custom scrollbar for chat areas */
     .chat-scroll::-webkit-scrollbar {
-        width: 5px;
+        width: 6px;
     }
 
     .chat-scroll::-webkit-scrollbar-track {
@@ -74,10 +74,120 @@
 
     .chat-scroll::-webkit-scrollbar-thumb {
         @apply bg-warm-200 dark:bg-warm-700 rounded-full;
+        transition: background-color 0.2s ease;
     }
 
     .chat-scroll::-webkit-scrollbar-thumb:hover {
         @apply bg-warm-300 dark:bg-warm-600;
+    }
+
+    /* Prose styles for markdown content */
+    .prose-warm {
+        --tw-prose-body: theme('colors.warm.700');
+        --tw-prose-headings: theme('colors.warm.800');
+        --tw-prose-links: theme('colors.primary.600');
+        --tw-prose-bold: theme('colors.warm.800');
+        --tw-prose-quotes: theme('colors.warm.600');
+        --tw-prose-quote-borders: theme('colors.primary.300');
+        --tw-prose-code: theme('colors.primary.600');
+        --tw-prose-pre-bg: theme('colors.warm.900');
+    }
+
+    .dark .prose-warm {
+        --tw-prose-body: theme('colors.warm.300');
+        --tw-prose-headings: theme('colors.warm.100');
+        --tw-prose-links: theme('colors.primary.400');
+        --tw-prose-bold: theme('colors.warm.100');
+        --tw-prose-quotes: theme('colors.warm.400');
+        --tw-prose-quote-borders: theme('colors.primary.600');
+        --tw-prose-code: theme('colors.primary.400');
+        --tw-prose-pre-bg: theme('colors.warm.950');
+    }
+
+    /* Message bubble animations */
+    .message-enter {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    .message-enter-active {
+        opacity: 1;
+        transform: translateY(0);
+        transition: all 0.3s ease-out;
+    }
+
+    /* Typewriter cursor */
+    .typewriter-cursor {
+        display: inline-block;
+        width: 2px;
+        height: 1em;
+        background-color: theme('colors.primary.500');
+        animation: blink 1s step-end infinite;
+        margin-left: 2px;
+        vertical-align: text-bottom;
+    }
+
+    @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+    }
+
+    /* Smooth gradient backgrounds */
+    .chat-bg-gradient {
+        background: linear-gradient(
+            180deg,
+            theme('colors.warm.50') 0%,
+            theme('colors.white') 100%
+        );
+    }
+
+    .dark .chat-bg-gradient {
+        background: linear-gradient(
+            180deg,
+            theme('colors.warm.900') 0%,
+            theme('colors.warm.950') 100%
+        );
+    }
+
+    /* Code block styling */
+    .code-block-wrapper {
+        position: relative;
+        margin: 0.75rem 0;
+    }
+
+    .code-block-wrapper pre {
+        margin: 0 !important;
+        border-radius: 0.75rem !important;
+    }
+
+    .code-block-header {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+    }
+
+    .code-block-wrapper:hover .code-block-header {
+        opacity: 1;
+    }
+
+    /* Line clamp utility */
+    .line-clamp-1 {
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .line-clamp-2 {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
     }
 
     /* Custom range slider */

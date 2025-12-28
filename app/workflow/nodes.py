@@ -1,5 +1,5 @@
 """Workflow nodes for the behavioral therapist system."""
-from typing import Dict, Any
+from typing import Dict, Any, AsyncGenerator
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import AzureChatOpenAI
 
@@ -17,6 +17,15 @@ llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,
     api_key=settings.azure_openai_api_key,
     api_version=settings.azure_openai_api_version
+)
+
+# Streaming LLM instance
+streaming_llm = AzureChatOpenAI(
+    azure_deployment=settings.azure_openai_deployment,
+    azure_endpoint=settings.azure_openai_endpoint,
+    api_key=settings.azure_openai_api_key,
+    api_version=settings.azure_openai_api_version,
+    streaming=True
 )
 
 
@@ -330,3 +339,72 @@ async def format_output(state: TherapistState) -> Dict[str, Any]:
         "messages": [*state["messages"], ai_message],
         "final_response": final_content
     }
+
+
+async def synthesize_response_streaming(state: TherapistState) -> AsyncGenerator[str, None]:
+    """
+    Stream the synthesized response token by token.
+
+    This is a standalone function (not a graph node) that streams
+    the LLM response for real-time display.
+
+    Args:
+        state: Current workflow state with analysis results
+
+    Yields:
+        Response tokens as strings
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Build synthesis prompt (same as synthesize_response)
+    synthesis_prompt = f"""
+You are an empathetic child behavioral therapist assistant. Synthesize the following
+information into a warm, supportive, and actionable response for the parent.
+
+Parent's Emotional State: {state.get('parent_emotional_state', 'neutral')}
+Child's Age: {state['child_age']} years
+Parent's Concern: {state['current_concern']}
+
+ANALYSIS RESULTS:
+{'-' * 60}
+
+Behavior Pattern Analysis:
+{state.get('behavior_analysis', 'No historical analysis available')}
+
+Psychological Perspective:
+{state.get('psychological_perspective', 'No theoretical analysis available')}
+
+Resource Recommendations:
+{state.get('material_recommendations', 'No recommendations available')}
+
+{'-' * 60}
+
+Please provide a response that:
+1. Acknowledges the parent's concern with empathy
+2. Normalizes the behavior if it's age-appropriate (based on analysis)
+3. References the child's history when relevant
+4. Explains the psychological perspective in parent-friendly language
+5. Provides 2-3 actionable recommendations
+6. Includes specific resources (books, activities, strategies)
+7. Ends with encouragement and next steps
+
+Keep the tone warm, supportive, and empowering. Use "your child" instead of clinical terms.
+Be specific and practical. Aim for 4-6 paragraphs.
+
+{"⚠️ IMPORTANT: Include a disclaimer to consult a professional for serious concerns." if state.get('requires_human_review') else ""}
+"""
+
+    try:
+        logger.info("[SYNTHESIS_STREAM] Starting streaming synthesis...")
+
+        # Stream the response
+        async for chunk in streaming_llm.astream(synthesis_prompt):
+            if chunk.content:
+                yield chunk.content
+
+        logger.info("[SYNTHESIS_STREAM] Streaming synthesis complete")
+
+    except Exception as e:
+        logger.error(f"[SYNTHESIS_STREAM] Error: {e}")
+        yield "I apologize, but I'm having trouble processing your message right now. Please try again in a moment."

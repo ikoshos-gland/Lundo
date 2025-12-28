@@ -1,6 +1,6 @@
 """Agent service for API integration."""
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, AsyncGenerator
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -42,7 +42,7 @@ class AgentService:
                 azure_endpoint=settings.azure_openai_endpoint,
                 api_key=settings.azure_openai_api_key,
                 api_version=settings.azure_openai_api_version,
-                max_tokens=30
+                max_tokens=150
             )
         return self._title_llm
 
@@ -198,6 +198,135 @@ class AgentService:
 
         except Exception as e:
             logger.error(f"Error in supervisor.process_message: {type(e).__name__}: {str(e)}", exc_info=True)
+            await db.rollback()
+            raise e
+
+    async def send_message_stream(
+        self,
+        db: AsyncSession,
+        conversation_id: int,
+        user_id: int,
+        content: str
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Send a message and stream AI response token by token.
+
+        Args:
+            db: Database session
+            conversation_id: Conversation ID
+            user_id: Parent user ID
+            content: Message content
+
+        Yields:
+            Dictionary with event type and data:
+            - {"type": "token", "data": {"content": "..."}}
+            - {"type": "metadata", "data": {...}}
+            - {"type": "done", "data": {...}}
+        """
+        # Get conversation with child info
+        result = await db.execute(
+            select(Conversation).where(Conversation.id == conversation_id)
+        )
+        conversation = result.scalar_one_or_none()
+
+        if not conversation:
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        # Verify ownership
+        result = await db.execute(
+            select(Child).where(Child.id == conversation.child_id)
+        )
+        child = result.scalar_one_or_none()
+
+        if not child or child.parent_id != user_id:
+            raise PermissionError("Not authorized to access this conversation")
+
+        # Save user message to database
+        user_message = Message(
+            conversation_id=conversation_id,
+            role="user",
+            content=content
+        )
+        db.add(user_message)
+        await db.commit()
+
+        try:
+            logger.info(f"Processing streaming message for child {child.id}, age {child.age_years}")
+
+            # Collect the full response for saving
+            full_response = ""
+            message_id = None
+
+            # Process through supervisor agent with streaming
+            async for event in supervisor.process_message_stream(
+                child_id=child.id,
+                child_age=child.age_years,
+                parent_id=user_id,
+                conversation_id=conversation_id,
+                thread_id=conversation.thread_id,
+                user_message=content
+            ):
+                event_type = event.get("type")
+
+                if event_type == "token":
+                    # Yield token to client
+                    token = event.get("content", "")
+                    full_response += token
+                    yield {"type": "token", "data": {"content": token}}
+
+                elif event_type == "analysis_complete":
+                    # Analysis phase complete, synthesis starting
+                    yield {"type": "status", "data": {"status": "generating"}}
+
+                elif event_type == "done":
+                    # Stream complete, save message
+                    metadata = event.get("metadata", {})
+
+                    # Save AI response to database
+                    ai_message = Message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=full_response,
+                        extra_data=str(metadata)
+                    )
+                    db.add(ai_message)
+
+                    # Update conversation timestamp
+                    conversation.updated_at = datetime.now()
+
+                    # Auto-generate title on first message exchange
+                    new_title = None
+                    if conversation.title == "New Conversation" or conversation.title.startswith("Chat about"):
+                        msg_count_result = await db.execute(
+                            select(func.count(Message.id)).where(Message.conversation_id == conversation_id)
+                        )
+                        msg_count = msg_count_result.scalar()
+
+                        if msg_count <= 2:
+                            logger.info(f"Generating auto-title for conversation {conversation_id}")
+                            new_title = await self.generate_conversation_title(
+                                user_message=content,
+                                ai_response=full_response
+                            )
+                            conversation.title = new_title
+                            logger.info(f"Auto-generated title: {new_title}")
+
+                    await db.commit()
+                    message_id = ai_message.id
+
+                    # Yield final metadata
+                    yield {
+                        "type": "done",
+                        "data": {
+                            "message_id": message_id,
+                            "requires_human_review": metadata.get("requires_human_review", False),
+                            "safety_flags": metadata.get("safety_flags", []),
+                            "new_title": new_title
+                        }
+                    }
+
+        except Exception as e:
+            logger.error(f"Error in streaming: {type(e).__name__}: {str(e)}", exc_info=True)
             await db.rollback()
             raise e
 

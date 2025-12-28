@@ -38,6 +38,32 @@ export interface SendMessageResponse {
     new_title?: string;  // Auto-generated title after first exchange
 }
 
+// Streaming event types
+export interface StreamTokenEvent {
+    content: string;
+}
+
+export interface StreamDoneEvent {
+    message_id: number;
+    requires_human_review: boolean;
+    safety_flags: string[];
+    new_title?: string;
+}
+
+export interface StreamStatusEvent {
+    status: string;
+}
+
+export interface StreamErrorEvent {
+    error: string;
+}
+
+export type StreamEvent =
+    | { type: 'token'; data: StreamTokenEvent }
+    | { type: 'done'; data: StreamDoneEvent }
+    | { type: 'status'; data: StreamStatusEvent }
+    | { type: 'error'; data: StreamErrorEvent };
+
 // Conversations API functions
 export const conversationsApi = {
     /**
@@ -81,6 +107,78 @@ export const conversationsApi = {
      */
     delete: async (id: number): Promise<void> => {
         await api.delete(`/conversations/${id}`);
+    },
+
+    /**
+     * Send a message and stream the AI response using SSE
+     */
+    sendMessageStream: async function* (
+        conversationId: number,
+        content: string
+    ): AsyncGenerator<StreamEvent, void, unknown> {
+        const token = localStorage.getItem('access_token');
+        const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
+
+        const response = await fetch(
+            `${baseUrl}/conversations/${conversationId}/messages/stream`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({ content }),
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        if (!response.body) {
+            throw new Error('Response body is null');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                // Parse SSE events from buffer
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+                let eventType = '';
+                let eventData = '';
+
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) {
+                        eventType = line.slice(7).trim();
+                    } else if (line.startsWith('data: ')) {
+                        eventData = line.slice(6);
+                    } else if (line === '' && eventType && eventData) {
+                        // End of event
+                        try {
+                            const data = JSON.parse(eventData);
+                            yield { type: eventType, data } as StreamEvent;
+                        } catch (e) {
+                            console.error('Failed to parse SSE data:', e);
+                        }
+                        eventType = '';
+                        eventData = '';
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
     },
 };
 

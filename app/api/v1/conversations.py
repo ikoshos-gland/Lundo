@@ -1,6 +1,9 @@
 """Conversation API endpoints."""
-from typing import List, Optional
+import json
+import logging
+from typing import List, Optional, AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
@@ -21,6 +24,7 @@ from app.dependencies import get_current_user
 from app.services.agent_service import AgentService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
@@ -293,6 +297,95 @@ async def send_message(
         )
 
 
+@router.post("/{conversation_id}/messages/stream")
+async def send_message_stream(
+    conversation_id: int,
+    message_data: MessageCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Send a message and stream the AI response using Server-Sent Events (SSE).
+
+    This endpoint processes the user's message through the complete
+    multi-agent workflow and streams the assistant's response token by token.
+
+    SSE Event Types:
+    - token: A chunk of the response text
+    - metadata: Message metadata (message_id, safety_flags, etc.)
+    - done: Stream complete
+    - error: An error occurred
+
+    Args:
+        conversation_id: Conversation ID
+        message_data: Message content
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        StreamingResponse with SSE events
+    """
+    # Get conversation
+    result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
+    )
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+
+    if not conversation.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Conversation is not active"
+        )
+
+    # Verify ownership through child
+    child_result = await db.execute(
+        select(Child).where(Child.id == conversation.child_id)
+    )
+    child = child_result.scalar_one_or_none()
+
+    if not child or child.parent_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to send messages in this conversation"
+        )
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        """Generate SSE events for the streaming response."""
+        agent_service = AgentService()
+
+        try:
+            async for event in agent_service.send_message_stream(
+                db=db,
+                conversation_id=conversation_id,
+                user_id=current_user.id,
+                content=message_data.content
+            ):
+                event_type = event.get("type", "token")
+                data = json.dumps(event.get("data", {}))
+                yield f"event: {event_type}\ndata: {data}\n\n"
+
+        except Exception as e:
+            logger.error(f"Streaming error: {str(e)}", exc_info=True)
+            error_data = json.dumps({"error": str(e)})
+            yield f"event: error\ndata: {error_data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
+
+
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(
     conversation_id: int,
@@ -335,7 +428,7 @@ async def delete_conversation(
         )
 
     # Delete conversation (cascade will delete messages)
-    db.delete(conversation)
+    await db.delete(conversation)
     await db.commit()
 
     return None
