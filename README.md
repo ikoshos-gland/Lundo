@@ -1,434 +1,542 @@
-# 🧒 Child Behavioral Therapist
+# Lundo
 
-A production-ready multi-agent child behavioral therapist system built with LangChain, LangGraph, and FastAPI.
+**AI-Powered Child Behavioral Therapist for Parents**
 
----
-
-## 📖 Table of Contents
-
-- [Overview](#overview)
-- [System Architecture](#system-architecture)
-- [Agentic Structure](#agentic-structure)
-- [Memory System (Dual-Layer)](#memory-system-dual-layer)
-- [RAG Knowledge Base](#rag-knowledge-base)
-- [LangGraph Workflow](#langgraph-workflow)
-- [Technology Stack](#technology-stack)
-- [Quick Start](#quick-start)
-- [API Endpoints](#api-endpoints)
-- [Configuration](#configuration)
-- [Development](#development)
+A production-ready multi-agent system that provides empathetic, evidence-based behavioral guidance using LangGraph, Azure OpenAI, and a sophisticated memory system.
 
 ---
 
-## Overview
+## What is Lundo?
 
-This system uses a **supervisor agent architecture** to provide empathetic, expert-informed behavioral guidance for parents. It combines:
+Lundo is an AI assistant that helps parents navigate challenging child behaviors with professional-grade guidance. It combines:
 
-- 🤖 **Multi-Agent Orchestration** – Supervisor coordinates specialized subagents
-- 🧠 **Dual-Layer Memory** – Short-term conversation state + long-term persistent child history
-- 📚 **RAG Knowledge Base** – Vector search over books, activities, and strategies
-- 🛡️ **Human-in-the-Loop** – Safety checks for sensitive topics
-- 🎭 **Psychological Skills** – Modular frameworks (Developmental, Behaviorist, etc.)
-
----
-
-## System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           PARENT INPUT                                  │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        SUPERVISOR AGENT                                 │
-│  • Orchestrates workflow                                                │
-│  • Manages conversation state                                           │
-│  • Updates long-term memory via LLM extraction                          │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-              ┌─────────────────────┼─────────────────────┐
-              ▼                     ▼                     ▼
-┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
-│  BEHAVIOR ANALYST   │ │   PSYCHOLOGICAL     │ │ MATERIAL CONSULTANT │
-│  ─────────────────  │ │   PERSPECTIVE       │ │  ─────────────────  │
-│  • Pattern analysis │ │   ─────────────     │ │  • Book search      │
-│  • History lookup   │ │   • Skill loading   │ │  • Activity search  │
-│  • Life events      │ │   • Framework lens  │ │  • Strategy search  │
-│  • Family context   │ │   • Age-appropriate │ │  • Age filtering    │
-└──────────┬──────────┘ └──────────┬──────────┘ └──────────┬──────────┘
-           │                       │                       │
-           │                       │                       │
-           │                       │                       │
-           ▼                       ▼                       ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      SYNTHESIZE + SAFETY CHECK                          │
-│  • Combine insights from all subagents                                  │
-│  • Apply safety filters and content moderation                          │
-│  • Human-in-the-loop interrupt for sensitive content                    │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      RESPONSE TO PARENT                                 │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+- **Multi-Agent Architecture** - Specialized AI agents working together
+- **Persistent Memory** - Remembers your child's history across sessions
+- **Evidence-Based Guidance** - Grounded in developmental psychology and behavioral science
+- **Safety-First Design** - Content filtering and professional referral triggers
+- **Age-Appropriate Recommendations** - Books, activities, and strategies filtered by child's age
 
 ---
 
-## Agentic Structure
+## Table of Contents
 
-### Supervisor Agent (`app/agents/supervisor.py`)
-
-The **central orchestrator** that:
-1. Receives parent messages and routes them through the workflow
-2. Coordinates all subagents via LangGraph
-3. Extracts and stores important information to long-term memory using structured LLM output
-4. Manages conversation lifecycle
-
-```python
-# Memory extraction uses structured output schemas
-class ExtractedMemory:
-    life_events: List[ExtractedLifeEvent]      # Death, divorce, moving, etc.
-    behavioral_patterns: List[ExtractedBehavior]
-    family_context: List[ExtractedFamilyContext]
-    emotional_triggers: List[str]
-    should_remember: bool                       # LLM decides if info is worth storing
-```
-
-### Subagents
-
-| Subagent | File | Purpose |
-|----------|------|---------|
-| **Behavior Analyst** | `app/agents/subagents/behavior_analyst.py` | Analyzes patterns, searches history, retrieves life events and family context |
-| **Material Consultant** | `app/agents/subagents/material_consultant.py` | Searches knowledge base for books, activities, and strategies |
-
-Both use **LangGraph's `create_react_agent`** with custom tools for memory/RAG access.
-
-### Psychological Skills (`app/agents/skills/`)
-
-**Modular framework plugins** that provide theoretical perspectives:
-
-| Skill | File | Focus |
-|-------|------|-------|
-| **Developmental Psychology** | `developmental_psychology.py` | Piaget stages, Erikson's psychosocial development |
-| **Behaviorist** | `behaviorist.py` | Operant conditioning, reinforcement, ABC model |
-
-Each skill provides:
-- `metadata` – Age ranges, keywords, best use cases
-- `framework_overview` – Theoretical background
-- `analysis_guidelines` – How to analyze behaviors through this lens
-- `intervention_strategies` – Age-appropriate techniques
-
-Skills are **loaded on-demand** based on relevance to prevent context window overflow.
-
----
-
-## Memory System (Dual-Layer)
-
-The system implements a **dual-layer memory architecture** for comprehensive context management:
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         MEMORY ARCHITECTURE                             │
-├─────────────────────────────────┬───────────────────────────────────────┤
-│       SHORT-TERM MEMORY         │         LONG-TERM MEMORY              │
-│    (Conversation State)         │      (Persistent Knowledge)           │
-├─────────────────────────────────┼───────────────────────────────────────┤
-│  AsyncPostgresSaver             │  AsyncPostgresStore                   │
-│  (LangGraph Checkpointer)       │  (LangGraph Store)                    │
-├─────────────────────────────────┼───────────────────────────────────────┤
-│  • Thread-scoped                │  • Child-scoped                       │
-│  • Stores conversation history  │  • Survives server restarts           │
-│  • Message accumulation         │  • Semantic search enabled            │
-│  • Auto-managed by LangGraph    │  • GDPR-compliant deletion            │
-└─────────────────────────────────┴───────────────────────────────────────┘
-```
-
-### Memory Backends (`app/memory/backends.py`)
-
-```python
-class MemoryBackends:
-    def get_checkpointer(self):
-        """Short-term: AsyncPostgresSaver for conversation state"""
-        
-    def get_store(self):
-        """Long-term: AsyncPostgresStore with semantic embeddings"""
-        
-    def search_memories(self, child_id, query, memory_types, limit):
-        """Semantic search across all memory types"""
-        
-    def delete_all_child_memories(self, child_id):
-        """GDPR compliance: Full child data deletion"""
-```
-
-### Memory Schemas (`app/memory/schemas.py`)
-
-| Schema | Purpose |
-|--------|---------|
-| `BehavioralPattern` | Observed behaviors with triggers, frequency, severity |
-| `DevelopmentalMilestone` | Achieved milestones with categories (physical, cognitive, etc.) |
-| `SuccessfulIntervention` | Strategies that worked, with effectiveness ratings |
-| `TriggerResponse` | Trigger-response patterns with coping strategies |
-| `TimelineEvent` | Significant life events (divorce, moving, death, etc.) |
-| `ChildMemory` | Aggregated memory structure per child |
-
-### Memory Manager (`app/memory/manager.py`)
-
-High-level interface for memory operations:
-
-```python
-class MemoryManager:
-    def add_behavioral_pattern(...)      # Record new patterns
-    def update_behavioral_pattern(...)   # Update existing patterns
-    def add_developmental_milestone(...) # Track milestones
-    def add_successful_intervention(...) # Log what works
-    def add_timeline_event(...)          # Track life events
-    
-    def search_similar_patterns(...)     # Semantic search for patterns
-    def search_relevant_interventions(...)# Find applicable interventions
-    def get_temporal_pattern_analysis(...)# Analyze trends over time
-```
-
----
-
-## RAG Knowledge Base
-
-The system uses **ChromaDB** with **Azure OpenAI embeddings** for retrieval-augmented generation:
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      KNOWLEDGE BASE (RAG)                                │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Storage: ChromaDB (Vector Store)                                       │
-│  Embeddings: Azure OpenAI text-embedding-3-large                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  📚 BOOKS COLLECTION                                                    │
-│  ├─ title, author, description                                          │
-│  ├─ age_range (min, max)                                                │
-│  ├─ topics (list)                                                       │
-│  └─ amazon_link (optional)                                              │
-│                                                                         │
-│  🎮 ACTIVITIES COLLECTION                                               │
-│  ├─ name, description, instructions                                     │
-│  ├─ age_range, duration_minutes                                         │
-│  ├─ skills_developed, materials_needed                                  │
-│  └─ category (motor, social, cognitive, etc.)                           │
-│                                                                         │
-│  📋 STRATEGIES COLLECTION                                               │
-│  ├─ name, description, implementation_steps                             │
-│  ├─ age_range, category                                                 │
-│  ├─ issues_addressed (list)                                             │
-│  └─ expected_outcomes                                                   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Vector Store (`app/knowledge_base/vector_store.py`)
-
-```python
-class KnowledgeBaseVectorStore:
-    def add_books(self, books: List[Dict])        # Bulk add books
-    def add_activities(self, activities: List[Dict])
-    def add_strategies(self, strategies: List[Dict])
-    
-    def search_books(self, query, child_age, k=5)
-    def search_activities(self, query, child_age, duration_max=None, k=5)
-    def search_strategies(self, query, child_age, category=None, k=5)
-```
-
-**Age Filtering**: All searches filter results by `child_age` to ensure age-appropriate recommendations.
-
----
-
-## LangGraph Workflow
-
-The core conversation flow is an **8-node LangGraph workflow**:
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         WORKFLOW PIPELINE                                │
-└─────────────────────────────────────────────────────────────────────────┘
-
-    parse_input ──► route_to_agents ──► call_behavior_analyst
-                                                │
-                                                ▼
-    format_output ◄── safety_check ◄── synthesize_response
-          │                                     ▲
-          │                                     │
-          ▼                       apply_psychological_perspective
-       [END]                                    ▲
-                                                │
-                               call_material_consultant ◄──┘
-```
-
-### Workflow State (`app/workflow/state.py`)
-
-```python
-class TherapistState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    child_id: int
-    child_age: int
-    parent_id: int
-    current_concern: str
-    parent_emotional_state: Optional[str]
-    
-    # Analysis results
-    behavior_analysis: Optional[str]
-    psychological_perspective: Optional[str]
-    material_recommendations: Optional[str]
-    
-    # Safety
-    requires_human_review: bool
-    safety_flags: list[str]
-    was_interrupted: bool
-    human_decision: Optional[str]
-```
-
-### Workflow Nodes (`app/workflow/nodes.py`)
-
-| Node | Purpose |
-|------|---------|
-| `parse_input` | Extract concern and emotional state from parent message |
-| `route_to_agents` | Decide which subagents to invoke |
-| `call_behavior_analyst` | Analyze patterns against child history |
-| `apply_psychological_perspective` | Load and apply relevant psychological skills |
-| `call_material_consultant` | Search knowledge base for recommendations |
-| `synthesize_response` | Combine all insights into coherent response |
-| `safety_check` | Flag sensitive content, trigger human-in-the-loop |
-| `format_output` | Create final formatted message |
-
----
-
-## Technology Stack
-
-| Component | Technology |
-|-----------|------------|
-| **LLM** | Azure OpenAI GPT-4 / gpt-5.2-chat |
-| **Embeddings** | Azure OpenAI text-embedding-3-large |
-| **Framework** | LangChain + LangGraph |
-| **Web API** | FastAPI |
-| **Database** | PostgreSQL 15+ |
-| **Memory Store** | LangGraph AsyncPostgresStore |
-| **Vector Store** | ChromaDB |
-| **Cache** | Redis |
-| **Task Queue** | Celery |
-| **Auth** | Firebase Authentication + JWT |
-| **Monitoring** | LangSmith, Prometheus, Sentry |
+1. [Quick Start](#quick-start)
+2. [Architecture Overview](#architecture-overview)
+3. [The Agent System](#the-agent-system)
+4. [Memory System](#memory-system)
+5. [LangGraph Workflow](#langgraph-workflow)
+6. [Safety Features](#safety-features)
+7. [API Reference](#api-reference)
+8. [Frontend](#frontend)
+9. [Database Models](#database-models)
+10. [Configuration](#configuration)
+11. [Development](#development)
+12. [Tech Stack](#tech-stack)
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.11+
-- Docker & Docker Compose
-- Azure OpenAI API keys
-
-### Installation
+### Using Docker (Recommended)
 
 ```bash
-# 1. Clone and configure
-cd Lundo
-cp .env.example .env
-# Edit .env with your API keys
+# 1. Clone and setup
+git clone https://github.com/your-repo/lundo.git
+cd lundo
+cp .env.docker.example .env
 
-# 2. Start with Docker
+# 2. Edit .env with your credentials
+#    - AZURE_OPENAI_* (required)
+#    - FIREBASE_PROJECT_ID (required)
+#    - SECRET_KEY, JWT_SECRET_KEY (generate secure values)
+
+# 3. Add Firebase credentials
+cp your-firebase-credentials.json ./firebase-credentials.json
+
+# 4. Start services
 docker-compose up -d
 
-# 3. Access
-# API: http://localhost:8080
-# Docs: http://localhost:8080/api/v1/docs
+# 5. Access
+# API:      http://localhost:8080
+# API Docs: http://localhost:8080/docs
+# Frontend: http://localhost:3000
 ```
 
 ### Local Development
 
 ```bash
-# 1. Create virtual environment
+# Backend
 python -m venv venv
 source venv/bin/activate
+pip install -r requirements.txt
 
-# 2. Install dependencies
-pip install -r requirements-dev.txt
+# Start dependencies
+docker-compose up -d postgres redis chroma_db
 
-# 3. Start infrastructure
-docker-compose up postgres redis chroma -d
-
-# 4. Run migrations
+# Run migrations & start server
 alembic upgrade head
-
-# 5. Start server
 uvicorn app.main:app --reload --port 8080
+
+# Frontend (in another terminal)
+cd frontend
+npm install
+npm run dev
 ```
 
 ---
 
-## API Endpoints
+## Architecture Overview
+
+```
+                              PARENT
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         FRONTEND                                 │
+│   React + TypeScript + Tailwind                                 │
+│   - Auth (Firebase)  - Chat Interface  - Children Management    │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         FASTAPI                                  │
+│   /auth  /children  /conversations  /memories  /interrupts     │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    SUPERVISOR AGENT                              │
+│                                                                  │
+│   ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐│
+│   │  Behavior   │  │  Material   │  │    Psychological        ││
+│   │  Analyst    │  │  Consultant │  │    Perspectives         ││
+│   └─────────────┘  └─────────────┘  └─────────────────────────┘│
+│                                                                  │
+│   ┌─────────────────────────────────────────────────────────────┐│
+│   │              LANGGRAPH WORKFLOW (8 Nodes)                   ││
+│   │  parse → route → analyze → psychology → materials →        ││
+│   │  synthesize → safety_check → format                        ││
+│   └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        ▼                       ▼                       ▼
+┌──────────────┐      ┌──────────────┐      ┌──────────────────┐
+│  PostgreSQL  │      │    Redis     │      │    ChromaDB      │
+│  - Users     │      │  - Cache     │      │  - Books         │
+│  - Children  │      │  - Sessions  │      │  - Activities    │
+│  - Messages  │      │              │      │  - Strategies    │
+│  - Memories  │      │              │      │                  │
+└──────────────┘      └──────────────┘      └──────────────────┘
+```
+
+---
+
+## The Agent System
+
+### Supervisor Agent
+
+The brain of the system. Located at `app/agents/supervisor.py`.
+
+**Responsibilities:**
+- Orchestrates the LangGraph workflow
+- Coordinates subagents
+- Extracts and stores memories using structured LLM output
+- Handles conversation state
+
+```python
+# Memory extraction uses structured output
+class ExtractedMemory(BaseModel):
+    life_events: List[ExtractedLifeEvent]    # death, divorce, moving, etc.
+    behaviors: List[ExtractedBehavior]        # specific concerns
+    family_context: List[ExtractedFamilyContext]
+    emotional_triggers: List[str]
+    should_remember: bool                     # LLM decides importance
+```
+
+### Subagents
+
+| Agent | File | Purpose |
+|-------|------|---------|
+| **Behavior Analyst** | `app/agents/subagents/behavior_analyst.py` | Analyzes patterns, searches child history, considers life events |
+| **Material Consultant** | `app/agents/subagents/material_consultant.py` | RAG search for books, activities, strategies (age-filtered) |
+
+### Psychological Skills
+
+Modular frameworks loaded on-demand based on relevance:
+
+| Skill | File | Framework |
+|-------|------|-----------|
+| **Developmental Psychology** | `app/agents/skills/developmental_psychology.py` | Piaget's stages, Erikson's development, age norms |
+| **Behaviorist** | `app/agents/skills/behaviorist.py` | Operant conditioning, ABC model, reinforcement |
+
+---
+
+## Memory System
+
+Lundo uses a **dual-layer memory architecture**:
+
+### Short-Term Memory (Conversation State)
+
+- Managed by LangGraph's `AsyncPostgresSaver`
+- Thread-scoped (per conversation)
+- Stores message history and workflow state
+- Auto-managed, no manual intervention needed
+
+### Long-Term Memory (Persistent Knowledge)
+
+- Stored in PostgreSQL with vector embeddings
+- Child-scoped (persists across conversations)
+- Semantic search enabled
+- GDPR-compliant deletion
+
+**What Gets Remembered:**
+
+| Memory Type | Examples |
+|------------|----------|
+| `life_events` | Death in family, divorce, moving, new sibling |
+| `behavioral_patterns` | Sleep issues, tantrums, anxiety triggers |
+| `family_context` | Single parent, siblings, living situation |
+| `successful_interventions` | What worked before |
+| `developmental_milestones` | Walking, talking, social skills |
+| `emotional_triggers` | What causes reactions |
+
+**Memory Schemas** (`app/memory/schemas.py`):
+
+```python
+class BehavioralPattern:
+    behavior: str           # "Difficulty falling asleep"
+    context: str            # "At bedtime, especially after screen time"
+    triggers: List[str]     # ["screen time", "sugar", "late naps"]
+    frequency: str          # "daily", "weekly", "occasional"
+    severity: str           # "mild", "moderate", "severe"
+    first_observed: datetime
+    last_observed: datetime
+
+class TimelineEvent:
+    event: str              # "Parents divorced"
+    category: str           # "life_change", "medical", "school"
+    impact: str             # "Increased anxiety, regression in behavior"
+    date: datetime
+```
+
+---
+
+## LangGraph Workflow
+
+The 8-node pipeline that processes every message:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                              │
+│  1. PARSE INPUT                                              │
+│     └─ Extract concern, detect emotional state               │
+│                                                              │
+│  2. ROUTE TO AGENTS                                          │
+│     └─ Decide which subagents/skills to invoke               │
+│                                                              │
+│  3. CALL BEHAVIOR ANALYST                                    │
+│     └─ Search history, analyze patterns, consider events     │
+│                                                              │
+│  4. APPLY PSYCHOLOGICAL PERSPECTIVE                          │
+│     └─ Load relevant skills, apply theoretical framework     │
+│                                                              │
+│  5. CALL MATERIAL CONSULTANT                                 │
+│     └─ RAG search: books, activities, strategies             │
+│                                                              │
+│  6. SYNTHESIZE RESPONSE                                      │
+│     └─ Combine all insights into cohesive guidance           │
+│                                                              │
+│  7. SAFETY CHECK                                             │
+│     └─ Content filter, add disclaimers, trigger HITL         │
+│                                                              │
+│  8. FORMAT OUTPUT                                            │
+│     └─ Create final response for parent                      │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Workflow State** (`app/workflow/state.py`):
+
+```python
+class TherapistState(TypedDict):
+    messages: Sequence[BaseMessage]
+    child_id: int
+    child_age: int
+    parent_id: int
+    current_concern: str
+    parent_emotional_state: Optional[str]
+    behavior_analysis: Optional[str]
+    psychological_perspective: Optional[str]
+    material_recommendations: Optional[str]
+    active_skills: List[str]
+    agents_to_call: List[str]
+    final_response: Optional[str]
+    requires_human_review: bool
+    safety_flags: List[str]
+```
+
+---
+
+## Safety Features
+
+### Content Detection (`app/safety/triggers.py`)
+
+Automatically detects and flags:
+
+| Category | Examples |
+|----------|----------|
+| **Medical/Clinical** | ADHD, autism, depression, medication |
+| **Harm** | Abuse, self-harm, violence, trauma |
+| **Emergency** | Crisis, danger, 911, suicidal |
+| **Developmental** | Severe delays, regression |
+
+### Response Handling
+
+1. **Low sensitivity**: Add subtle disclaimer
+2. **Medium sensitivity**: Add professional referral notice
+3. **High sensitivity**: Trigger Human-in-the-Loop review
+
+### Disclaimers (`app/safety/disclaimers.py`)
+
+Automatically appended when needed:
+- Professional consultation recommendations
+- Crisis resources (911, 988 mental health line)
+- AI limitation acknowledgments
+
+### Human-in-the-Loop (HITL)
+
+When content is flagged as requiring review:
+
+```python
+# Workflow interrupts via LangGraph
+human_decision = interrupt(review_prompt)
+
+# Admin reviews and decides:
+# - "approve": Send as-is
+# - "edit": Send modified version
+# - "reject": Send safe alternative
+```
+
+---
+
+## API Reference
 
 ### Authentication
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/auth/register` | Register parent account |
-| POST | `/api/v1/auth/login` | Login and get JWT |
-| POST | `/api/v1/auth/refresh` | Refresh access token |
 
-### Child Profiles
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/v1/children` | Create child profile |
-| GET | `/api/v1/children` | List your children |
-| GET | `/api/v1/children/{id}` | Get child details |
-| PUT | `/api/v1/children/{id}` | Update profile |
-| DELETE | `/api/v1/children/{id}` | Delete profile |
+| `POST` | `/api/v1/auth/register` | Register new parent account |
+| `POST` | `/api/v1/auth/login` | Login with email/password |
+| `POST` | `/api/v1/auth/firebase` | Login with Firebase token |
+| `POST` | `/api/v1/auth/refresh` | Refresh access token |
+| `GET` | `/api/v1/auth/me` | Get current user |
+
+### Children
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/children` | Create child profile |
+| `GET` | `/api/v1/children` | List all children |
+| `GET` | `/api/v1/children/{id}` | Get child details |
+| `PUT` | `/api/v1/children/{id}` | Update child |
+| `DELETE` | `/api/v1/children/{id}` | Delete child (GDPR) |
 
 ### Conversations
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/conversations` | Start conversation |
-| POST | `/api/v1/conversations/{id}/messages` | Send message |
-| GET | `/api/v1/conversations/{id}` | Get history |
 
-### Memory & Insights
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/children/{id}/memories` | View long-term memories |
-| GET | `/api/v1/children/{id}/patterns` | Behavioral patterns |
-| GET | `/api/v1/children/{id}/timeline` | Developmental timeline |
+| `POST` | `/api/v1/conversations` | Start new conversation |
+| `GET` | `/api/v1/conversations` | List conversations |
+| `GET` | `/api/v1/conversations/{id}` | Get with messages |
+| `POST` | `/api/v1/conversations/{id}/messages` | **Send message** |
+| `DELETE` | `/api/v1/conversations/{id}` | Delete conversation |
+
+**Send Message Response:**
+
+```json
+{
+  "message_id": 123,
+  "content": "AI response text...",
+  "requires_human_review": false,
+  "safety_flags": [],
+  "metadata": {
+    "agents_called": ["behavior_analyst", "material_consultant"],
+    "skills_used": ["developmental_psychology"],
+    "parent_emotional_state": "worried"
+  }
+}
+```
+
+### Memories
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/memories/{child_id}/summary` | Memory overview |
+| `POST` | `/api/v1/memories/{child_id}/search` | Semantic search |
+| `GET` | `/api/v1/memories/{child_id}/patterns` | Behavioral patterns |
+| `GET` | `/api/v1/memories/{child_id}/timeline` | Life events |
+| `GET` | `/api/v1/memories/{child_id}/interventions` | What worked |
+| `DELETE` | `/api/v1/memories/{child_id}/all` | Delete all (GDPR) |
+
+---
+
+## Frontend
+
+### Structure
+
+```
+frontend/src/
+├── api/                    # API client modules
+│   ├── api.ts              # Axios instance
+│   ├── auth.ts             # Auth endpoints
+│   ├── children.ts         # Children endpoints
+│   └── conversations.ts    # Chat endpoints
+├── components/
+│   ├── layout/             # Header, Footer, Layout
+│   └── ui/                 # Button, Card, Input, etc.
+├── config/
+│   └── firebase.ts         # Firebase configuration
+├── features/
+│   ├── auth/               # Login, Register, AuthContext
+│   ├── chat/               # ChatPage (main interface)
+│   ├── children/           # ChildrenPage (manage profiles)
+│   └── dashboard/          # Dashboard (overview)
+└── types/                  # TypeScript interfaces
+```
+
+### Key Features
+
+- **Authentication**: Email/password + Firebase Google sign-in
+- **Dashboard**: Overview of children, recent conversations
+- **Children Management**: Create, edit, delete child profiles
+- **Chat Interface**: Real-time messaging with typing indicators
+- **Responsive Design**: Mobile-first with dark mode support
+
+---
+
+## Database Models
+
+### User (Parent)
+
+```python
+class User(Base):
+    id: int
+    email: str                    # Unique
+    hashed_password: Optional[str]  # Null for Firebase users
+    full_name: str
+    is_active: bool
+    is_verified: bool
+    firebase_uid: Optional[str]   # For Firebase auth
+
+    children: List[Child]         # Relationship
+```
+
+### Child
+
+```python
+class Child(Base):
+    id: int
+    parent_id: int                # FK → User
+    name: str
+    date_of_birth: date
+    gender: Optional[str]
+    notes: Optional[str]
+
+    @property
+    def age_years(self) -> int    # Computed from DOB
+
+    conversations: List[Conversation]
+```
+
+### Conversation
+
+```python
+class Conversation(Base):
+    id: int
+    child_id: int                 # FK → Child
+    user_id: int                  # FK → User
+    thread_id: str                # LangGraph thread ID (unique)
+    title: str                    # Auto-generated
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    messages: List[Message]
+```
+
+### Message
+
+```python
+class Message(Base):
+    id: int
+    conversation_id: int          # FK → Conversation
+    role: str                     # "user" | "assistant" | "system"
+    content: str
+    extra_data: Optional[str]     # JSON: agent traces, metadata
+    created_at: datetime
+```
 
 ---
 
 ## Configuration
 
-Key environment variables (`.env`):
+### Required Environment Variables
 
 ```bash
-# LLM (Azure OpenAI)
-AZURE_OPENAI_API_KEY=your-key
-AZURE_OPENAI_ENDPOINT=https://your-endpoint.openai.azure.com
-AZURE_OPENAI_DEPLOYMENT=gpt-5.2-chat
+# Azure OpenAI (Chat Model)
+AZURE_OPENAI_API_KEY=your-api-key
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_DEPLOYMENT=gpt-4o  # or your deployment name
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
 
-# Embeddings
-AZURE_OPENAI_EMBEDDING_API_KEY=your-key
-AZURE_OPENAI_EMBEDDING_ENDPOINT=https://your-endpoint.openai.azure.com
+# Azure OpenAI (Embeddings)
+AZURE_OPENAI_EMBEDDING_API_KEY=your-embedding-key
+AZURE_OPENAI_EMBEDDING_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-large
 
-# Database
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/child_therapist
-REDIS_URL=redis://localhost:6379/0
+# Firebase
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_CREDENTIALS_PATH=firebase-credentials.json
 
-# Vector Store
+# Database
+DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5433/lundo
+REDIS_URL=redis://localhost:6380/0
+
+# Security (generate secure values!)
+SECRET_KEY=your-secret-key
+JWT_SECRET_KEY=your-jwt-secret
+
+# CORS
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+```
+
+### Optional Variables
+
+```bash
+# LangSmith (AI observability)
+LANGSMITH_API_KEY=your-key
+LANGSMITH_PROJECT=lundo
+LANGSMITH_TRACING=true
+
+# ChromaDB
 CHROMA_HOST=localhost
 CHROMA_PORT=8000
 
-# Auth
-JWT_SECRET_KEY=your-secret-key
-FIREBASE_CREDENTIALS_PATH=firebase-credentials.json
+# App Settings
+APP_ENV=development
+DEBUG=true
+LOG_LEVEL=INFO
+```
 
-# Monitoring (optional)
-LANGSMITH_API_KEY=your-key
-LANGSMITH_TRACING=true
+### Generate Secure Keys
+
+```bash
+# Generate SECRET_KEY
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# Generate JWT_SECRET_KEY
+python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 ---
@@ -438,54 +546,40 @@ LANGSMITH_TRACING=true
 ### Project Structure
 
 ```
-Lundo/
+lundo/
 ├── app/
 │   ├── agents/
-│   │   ├── supervisor.py      # Main orchestrator
-│   │   ├── subagents/         # Behavior Analyst, Material Consultant
-│   │   └── skills/            # Psychological framework plugins
-│   ├── api/                   # REST API endpoints
-│   ├── database/              # SQLAlchemy + migrations
-│   ├── memory/                # Dual-layer memory system
-│   │   ├── backends.py        # PostgresStore + Checkpointer
-│   │   ├── manager.py         # High-level memory operations
-│   │   └── schemas.py         # Memory data models
-│   ├── knowledge_base/        # RAG vector store
-│   │   ├── vector_store.py    # ChromaDB integration
-│   │   └── resources/         # Book/activity/strategy data
-│   ├── workflow/              # LangGraph workflow
-│   │   ├── graph.py           # Workflow definition
-│   │   ├── nodes.py           # Node implementations
-│   │   └── state.py           # State schema
-│   ├── models/                # SQLAlchemy ORM models
-│   ├── schemas/               # Pydantic request/response schemas
-│   ├── services/              # Business logic layer
-│   └── safety/                # Human-in-the-loop config
-├── tests/                     # Test suites
-├── frontend/                  # React frontend
-├── docker/                    # Docker configuration
-└── data/                      # Local data storage
-```
-
-### Running Tests
-
-```bash
-pytest tests/ -v
-```
-
-### Code Quality
-
-```bash
-black app/ tests/
-ruff check app/ tests/
-mypy app/
+│   │   ├── supervisor.py          # Main orchestrator
+│   │   ├── subagents/
+│   │   │   ├── behavior_analyst.py
+│   │   │   └── material_consultant.py
+│   │   └── skills/
+│   │       ├── developmental_psychology.py
+│   │       └── behaviorist.py
+│   ├── api/v1/                    # API endpoints
+│   ├── database/                  # DB setup, migrations
+│   ├── memory/                    # Memory system
+│   ├── models/                    # SQLAlchemy models
+│   ├── safety/                    # Content filtering
+│   ├── schemas/                   # Pydantic schemas
+│   ├── services/                  # Business logic
+│   ├── workflow/                  # LangGraph workflow
+│   ├── knowledge_base/            # RAG vector store
+│   ├── config.py                  # Settings
+│   └── main.py                    # FastAPI app
+├── frontend/                      # React app
+├── docker/                        # Docker configs
+├── tests/                         # Test suites
+├── docker-compose.yml
+├── requirements.txt
+└── alembic.ini
 ```
 
 ### Database Migrations
 
 ```bash
-# Create migration
-alembic revision --autogenerate -m "Description"
+# Create new migration
+alembic revision --autogenerate -m "Add feature X"
 
 # Apply migrations
 alembic upgrade head
@@ -494,12 +588,94 @@ alembic upgrade head
 alembic downgrade -1
 ```
 
+### Running Tests
+
+```bash
+pytest tests/ -v --cov=app
+```
+
+### Code Quality
+
+```bash
+# Format
+black app/ tests/
+
+# Lint
+ruff check app/ tests/
+
+# Type check
+mypy app/
+```
+
+---
+
+## Tech Stack
+
+### Backend
+
+| Technology | Purpose |
+|------------|---------|
+| **FastAPI** | Web framework |
+| **LangGraph** | Agent workflow orchestration |
+| **Azure OpenAI** | LLM (chat) + Embeddings |
+| **PostgreSQL** | Primary database |
+| **Redis** | Caching, session storage |
+| **ChromaDB** | Vector store for RAG |
+| **SQLAlchemy 2.0** | Async ORM |
+| **Pydantic v2** | Data validation |
+| **Firebase Admin** | Authentication |
+
+### Frontend
+
+| Technology | Purpose |
+|------------|---------|
+| **React 19** | UI framework |
+| **TypeScript** | Type safety |
+| **Vite 5** | Build tool |
+| **Tailwind CSS** | Styling |
+| **React Router v6** | Navigation |
+| **Axios** | HTTP client |
+| **Lucide React** | Icons |
+| **Firebase SDK** | Auth client |
+
+### Infrastructure
+
+| Technology | Purpose |
+|------------|---------|
+| **Docker** | Containerization |
+| **Docker Compose** | Local orchestration |
+| **LangSmith** | LLM observability |
+
+---
+
+## Docker Services
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| `api` | 8080 | FastAPI application |
+| `postgres` | 5433 | PostgreSQL database |
+| `redis` | 6380 | Cache & queue |
+| `chroma_db` | 8000 | Vector store |
+| `frontend` | 3000 | React application |
+| `worker` | - | Celery background tasks |
+| `flower` | 5555 | Celery monitoring UI |
+
 ---
 
 ## License
 
-Proprietary - All rights reserved
+MIT
 
 ---
 
-> ⚠️ **Disclaimer**: This system provides general guidance only and is not a replacement for professional mental health services. Always consult qualified professionals for serious behavioral concerns.
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests and linting
+5. Submit a pull request
+
+---
+
+Built with LangGraph + Azure OpenAI
