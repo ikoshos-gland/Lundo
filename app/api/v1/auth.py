@@ -194,7 +194,7 @@ async def get_current_user_info(
     return current_user
 
 
-@router.post("/firebase", response_model=UserResponse)
+@router.post("/firebase", response_model=Token)
 async def firebase_auth(
     auth_data: FirebaseAuth,
     db: AsyncSession = Depends(get_db)
@@ -210,7 +210,7 @@ async def firebase_auth(
         db: Database session
 
     Returns:
-        User information
+        Access and refresh tokens
 
     Raises:
         HTTPException: If token is invalid
@@ -279,4 +279,12 @@ async def firebase_auth(
             detail="Account is inactive"
         )
 
-    return user
+    # Create JWT tokens (same as regular login)
+    access_token = create_access_token(data={"sub": str(user.id)})
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }

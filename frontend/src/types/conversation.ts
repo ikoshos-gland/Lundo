@@ -16,9 +16,11 @@ export interface MessageMetadata {
 
 export interface Conversation {
   id: number;
-  user_id: number;
+  user_id?: number;
   child_id: number;
-  title?: string;
+  thread_id: string;
+  title: string;
+  is_active: boolean;
   summary?: string;
   created_at: string;
   updated_at: string;
@@ -27,7 +29,7 @@ export interface Conversation {
 
 export interface ConversationCreate {
   child_id: number;
-  title?: string;
+  initial_message?: string;
 }
 
 export interface MessageCreate {
@@ -37,8 +39,10 @@ export interface MessageCreate {
 export interface ConversationListItem {
   id: number;
   child_id: number;
+  thread_id: string;
   child_name?: string;
-  title?: string;
+  title: string;
+  is_active: boolean;
   last_message?: string;
   last_message_at?: string;
   message_count?: number;

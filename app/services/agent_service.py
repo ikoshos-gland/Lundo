@@ -3,12 +3,16 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
+
+from langchain_openai import AzureChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agents.supervisor import supervisor
 from app.models.child import Child
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +26,65 @@ class AgentService:
     - Database updates (conversations, messages)
     - Child profile lookups
     - Error handling and validation
+    - Auto-generating conversation titles
     """
+
+    def __init__(self):
+        """Initialize the agent service with LLM for title generation."""
+        self._title_llm = None
+
+    @property
+    def title_llm(self):
+        """Lazy-load LLM for title generation."""
+        if self._title_llm is None:
+            self._title_llm = AzureChatOpenAI(
+                azure_deployment=settings.azure_openai_deployment,
+                azure_endpoint=settings.azure_openai_endpoint,
+                api_key=settings.azure_openai_api_key,
+                api_version=settings.azure_openai_api_version,
+                max_tokens=30
+            )
+        return self._title_llm
+
+    async def generate_conversation_title(
+        self,
+        user_message: str,
+        ai_response: str
+    ) -> str:
+        """
+        Generate a concise conversation title based on the first exchange.
+
+        Args:
+            user_message: The user's first message
+            ai_response: The AI's response
+
+        Returns:
+            A 3-6 word title summarizing the conversation topic
+        """
+        try:
+            messages = [
+                SystemMessage(content=(
+                    "Generate a very short conversation title (3-6 words max). "
+                    "Focus on the main topic or concern. No quotes, no punctuation at the end. "
+                    "Examples: 'Bedtime Tantrums Help', 'Sibling Rivalry Advice', 'School Anxiety Support'"
+                )),
+                HumanMessage(content=f"User asked: {user_message[:200]}\n\nAssistant replied about: {ai_response[:200]}")
+            ]
+
+            response = await self.title_llm.ainvoke(messages)
+            title = response.content.strip().strip('"\'')
+
+            # Ensure reasonable length
+            if len(title) > 50:
+                title = title[:47] + "..."
+
+            return title if title else "New Conversation"
+
+        except Exception as e:
+            logger.warning(f"Failed to generate title: {e}")
+            # Fallback: use first few words of user message
+            words = user_message.split()[:5]
+            return " ".join(words) + ("..." if len(words) == 5 else "")
 
     async def send_message(
         self,
@@ -99,15 +161,40 @@ class AgentService:
             # Update conversation timestamp
             conversation.updated_at = datetime.now()
 
+            # Auto-generate title on first message exchange
+            new_title = None
+            if conversation.title == "New Conversation" or conversation.title.startswith("Chat about"):
+                # Count messages to confirm this is the first exchange
+                msg_count_result = await db.execute(
+                    select(func.count(Message.id)).where(Message.conversation_id == conversation_id)
+                )
+                msg_count = msg_count_result.scalar()
+
+                # If this is the first exchange (user message + AI response = 2 messages including the one we just added)
+                if msg_count <= 2:
+                    logger.info(f"Generating auto-title for conversation {conversation_id}")
+                    new_title = await self.generate_conversation_title(
+                        user_message=content,
+                        ai_response=result["response"]
+                    )
+                    conversation.title = new_title
+                    logger.info(f"Auto-generated title: {new_title}")
+
             await db.commit()
 
-            return {
+            response_data = {
                 "message_id": ai_message.id,
                 "content": result["response"],
                 "requires_human_review": result.get("requires_human_review", False),
                 "safety_flags": result.get("safety_flags", []),
                 "metadata": result.get("metadata", {})
             }
+
+            # Include new title if generated
+            if new_title:
+                response_data["new_title"] = new_title
+
+            return response_data
 
         except Exception as e:
             logger.error(f"Error in supervisor.process_message: {type(e).__name__}: {str(e)}", exc_info=True)

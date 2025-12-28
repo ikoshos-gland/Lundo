@@ -96,7 +96,24 @@
       }
     </style>
   </head>
-  <body>
+  <body class="overflow-x-hidden">
+    <!-- Dynamic Animated Background -->
+    <div class="fixed inset-0 -z-10 h-full w-full transition-colors duration-300 overflow-hidden">
+      <!-- Light Mode Blobs -->
+      <div class="absolute inset-0 opacity-100 dark:opacity-0 transition-opacity duration-700 bg-[#fdfcf8]">
+        <div class="absolute top-0 -left-4 w-96 h-96 bg-[#fed7aa] rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
+        <div class="absolute top-0 -right-4 w-96 h-96 bg-[#ffedd5] rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
+        <div class="absolute -bottom-32 left-20 w-96 h-96 bg-[#e7e5e4] rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
+        <div class="absolute bottom-40 right-10 w-80 h-80 bg-[#ffdbd0] rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
+      </div>
+      <!-- Dark Mode Blobs -->
+      <div class="absolute inset-0 opacity-0 dark:opacity-100 transition-opacity duration-700 bg-[#0c0a09]">
+        <div class="absolute top-0 -left-4 w-96 h-96 bg-[#292524] rounded-full mix-blend-screen filter blur-[100px] opacity-20 animate-blob"></div>
+        <div class="absolute top-0 -right-4 w-96 h-96 bg-[#431407] rounded-full mix-blend-screen filter blur-[100px] opacity-10 animate-blob animation-delay-2000"></div>
+        <div class="absolute -bottom-32 left-20 w-96 h-96 bg-[#1c1917] rounded-full mix-blend-screen filter blur-[100px] opacity-30 animate-blob animation-delay-4000"></div>
+      </div>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

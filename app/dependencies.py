@@ -1,4 +1,5 @@
 """FastAPI dependencies for authentication and database."""
+import logging
 from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -10,6 +11,8 @@ from app.database.session import get_db
 from app.models.user import User
 from app.utils.security import decode_token
 from app.services.firebase import verify_firebase_token
+
+logger = logging.getLogger(__name__)
 
 # HTTP Bearer token scheme
 security = HTTPBearer()
@@ -41,12 +44,14 @@ async def get_current_user(
     )
 
     token = credentials.credentials
+    logger.info(f"Received token (first 50 chars): {token[:50]}..." if len(token) > 50 else f"Received token: {token}")
     user_id: Optional[str] = None
     firebase_uid: Optional[str] = None
     email: Optional[str] = None
 
     # Try Firebase token first
     firebase_claims = verify_firebase_token(token)
+    logger.info(f"Firebase verification result: {'success' if firebase_claims else 'failed/skipped'}")
     if firebase_claims:
         firebase_uid = firebase_claims.get("uid")
         email = firebase_claims.get("email")
@@ -83,14 +88,21 @@ async def get_current_user(
             return user
 
     # Fall back to JWT token
+    logger.info("Falling back to JWT token verification")
     try:
         payload = decode_token(token)
+        logger.info(f"JWT decode successful, payload: {payload}")
         user_id = payload.get("sub")
 
         if user_id is None:
+            logger.warning("JWT payload missing 'sub' claim")
             raise credentials_exception
 
-    except JWTError:
+    except JWTError as e:
+        logger.error(f"JWT decode error: {type(e).__name__}: {e}")
+        raise credentials_exception
+    except Exception as e:
+        logger.error(f"Unexpected error decoding token: {type(e).__name__}: {e}")
         raise credentials_exception
 
     # Get user from database by ID
