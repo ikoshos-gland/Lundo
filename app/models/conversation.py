@@ -33,6 +33,12 @@ class Conversation(Base):
         nullable=False,
         index=True
     )
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     thread_id: Mapped[str] = mapped_column(
         String(255),
         unique=True,

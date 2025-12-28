@@ -1,34 +1,56 @@
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.venv/
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
+# Git
 .git
 .gitignore
-.mypy_cache
-.pytest_cache
-.hypothesis
-.env
-.env.local
-*.db
-*.sqlite
-data/
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+env/
+.eggs/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
-.DS_Store
+
+# Environment files (mounted at runtime)
+.env
+.env.*
+!.env.example
+
+# Data directories (use volumes)
+data/
+
+# Documentation
+*.md
+!README.md
+
+# Tests (not needed in production image)
+tests/
+
+# Development files
+docker-compose*.yml
+Makefile
+
+# Frontend (if exists)
+frontend/
+exampleUI/
+
+# Zone.Identifier files (Windows artifacts)
+*Zone.Identifier
+
+# Temporary
+*.tmp
+*.bak
+*.log

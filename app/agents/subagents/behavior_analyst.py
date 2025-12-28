@@ -1,8 +1,8 @@
 """Behavior Analyst subagent - Pattern recognition and historical analysis."""
 from typing import Dict, Any
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.tools import tool
-from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_openai import AzureChatOpenAI
+from langchain_core.tools import tool
+from langgraph.prebuilt import create_react_agent
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.config import settings
@@ -24,12 +24,11 @@ async def read_child_memory(child_id: int, memory_type: str) -> str:
     Returns:
         JSON string of memory data
     """
-    from app.config import settings
-    from app.memory.backends import MemoryBackends
+    from app.memory.backends import get_memory_backends
     import json
 
-    backends = MemoryBackends(settings.database_url)
-    memory_data = await backends.get_long_term_memory(child_id, memory_type)
+    backends = get_memory_backends()
+    memory_data = await backends.get_long_term_memory(child_id, memory_type, key="main")
 
     if not memory_data:
         return f"No {memory_type} found for this child yet."
@@ -49,11 +48,10 @@ async def search_similar_patterns(child_id: int, current_behavior: str) -> str:
     Returns:
         Similar patterns found in history
     """
-    from app.config import settings
-    from app.memory.backends import MemoryBackends
+    from app.memory.backends import get_memory_backends
     import json
 
-    backends = MemoryBackends(settings.database_url)
+    backends = get_memory_backends()
     results = await backends.search_memories(
         child_id=child_id,
         query=current_behavior,
@@ -64,6 +62,88 @@ async def search_similar_patterns(child_id: int, current_behavior: str) -> str:
         return "No similar patterns found in history."
 
     return json.dumps(results, indent=2, default=str)
+
+
+@tool
+async def get_family_context(child_id: int) -> str:
+    """
+    Get family context and background information for a child.
+
+    This includes important family information like:
+    - Family structure (single parent, siblings, etc.)
+    - Living situation
+    - Key relationships
+
+    Args:
+        child_id: Child's ID
+
+    Returns:
+        Family context information
+    """
+    from app.memory.backends import get_memory_backends
+    import json
+
+    backends = get_memory_backends()
+    family_data = await backends.get_long_term_memory(
+        child_id=child_id,
+        memory_type="family_context",
+        key="main"
+    )
+
+    if not family_data:
+        return "No family context information available for this child yet."
+
+    return json.dumps(family_data, indent=2, default=str)
+
+
+@tool
+async def get_life_events(child_id: int) -> str:
+    """
+    Get significant life events for a child (death, divorce, moving, etc.).
+
+    This is CRITICAL context - always check this when analyzing behaviors,
+    as major life events often explain behavioral changes.
+
+    Args:
+        child_id: Child's ID
+
+    Returns:
+        Timeline of significant life events
+    """
+    from app.memory.backends import get_memory_backends
+    import json
+    import logging
+    logger = logging.getLogger(__name__)
+
+    logger.info(f"[TOOL] get_life_events called for child_id={child_id}")
+
+    backends = get_memory_backends()
+    logger.info(f"[TOOL] get_life_events - got backends")
+
+    # Get from main memory's timeline_events
+    logger.info(f"[TOOL] get_life_events - calling get_long_term_memory...")
+    memory_data = await backends.get_long_term_memory(
+        child_id=child_id,
+        memory_type="behavioral_patterns",
+        key="main"
+    )
+    logger.info(f"[TOOL] get_life_events - got memory_data: {memory_data is not None}")
+
+    if not memory_data:
+        return "No life events recorded for this child yet."
+
+    timeline_events = memory_data.get("timeline_events", [])
+
+    # Filter for life_change and medical events (the significant ones)
+    significant_events = [
+        event for event in timeline_events
+        if event.get("category") in ["life_change", "medical", "challenge"]
+    ]
+
+    if not significant_events:
+        return "No significant life events recorded for this child."
+
+    return json.dumps(significant_events, indent=2, default=str)
 
 
 class BehaviorAnalyst:
@@ -85,12 +165,21 @@ Your role is to:
 3. Determine if behaviors have occurred before and when
 4. Analyze behavioral trends over time
 5. Provide data-driven insights based on the child's unique history
+6. Consider life events and family context when analyzing behaviors
 
-You have access to tools to read the child's long-term memory:
-- read_child_memory: Access specific memory types
-- search_similar_patterns: Find similar past behaviors
+You have access to these tools to read the child's long-term memory:
+- read_child_memory: Access specific memory types (behavioral_patterns, developmental_history, etc.)
+- search_similar_patterns: Find similar past behaviors using semantic search
+- get_family_context: Get family structure and background (single parent, siblings, etc.)
+- get_life_events: Get significant life events (death, divorce, moving, etc.) - ALWAYS CHECK THIS!
+
+IMPORTANT: Always check life events first! Major life events (death in family, divorce, moving)
+often explain behavioral changes. A child's behavior cannot be properly analyzed without
+understanding what they've been through.
 
 When analyzing:
+- FIRST check for life events that might explain behavior
+- Consider family context (single parent household, etc.)
 - Be specific about dates and frequencies
 - Note any seasonal or situational patterns
 - Compare current context to past contexts
@@ -101,42 +190,35 @@ Always base your analysis on the child's actual history when available.
 If no history exists, clearly state this is the first time you're observing this behavior.
 
 Format your response as a structured analysis with:
-1. Pattern Match: How similar to past behaviors?
-2. Historical Context: When did this happen before?
-3. Triggers Identified: Common triggers across instances
-4. Progression: Is this improving, stable, or worsening?
-5. Relevant History: What past events might relate?
+1. Life Events Context: Any major life events that might relate?
+2. Family Context: Relevant family situation?
+3. Pattern Match: How similar to past behaviors?
+4. Historical Context: When did this happen before?
+5. Triggers Identified: Common triggers across instances
+6. Progression: Is this improving, stable, or worsening?
 """
 
     def __init__(self):
         """Initialize the behavior analyst."""
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-pro",
-            google_api_key=settings.google_api_key,
-            temperature=0.3  # Lower temperature for more factual analysis
+        self.llm = AzureChatOpenAI(
+            azure_deployment=settings.azure_openai_deployment,
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_key=settings.azure_openai_api_key,
+            api_version=settings.azure_openai_api_version
         )
 
-        self.tools = [read_child_memory, search_similar_patterns]
+        self.tools = [
+            read_child_memory,
+            search_similar_patterns,
+            get_family_context,
+            get_life_events
+        ]
 
-        # Create prompt template
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", self.SYSTEM_PROMPT),
-            ("human", "{input}"),
-            ("placeholder", "{agent_scratchpad}")
-        ])
-
-        # Create agent
-        self.agent = create_tool_calling_agent(
-            llm=self.llm,
+        # Create react agent using LangGraph
+        self.agent = create_react_agent(
+            model=self.llm,
             tools=self.tools,
-            prompt=self.prompt
-        )
-
-        self.executor = AgentExecutor(
-            agent=self.agent,
-            tools=self.tools,
-            verbose=True,
-            max_iterations=5
+            prompt=self.SYSTEM_PROMPT
         )
 
     async def analyze(
@@ -169,10 +251,14 @@ Please:
 5. Note if this is a recurring issue or something new
 """
 
-        result = await self.executor.ainvoke({"input": input_text})
+        result = await self.agent.ainvoke({"messages": [("human", input_text)]})
+
+        # Extract the last message content from the agent response
+        last_message = result["messages"][-1]
+        output = last_message.content if hasattr(last_message, 'content') else str(last_message)
 
         return {
-            "analysis": result["output"],
+            "analysis": output,
             "child_id": child_id,
             "concern": current_concern
         }

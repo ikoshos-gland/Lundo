@@ -80,10 +80,10 @@ async def seed_vector_store():
         try:
             await vector_store.add_activity(activity)
             success_count += 1
-            logger.debug(f"Added activity: {activity['title']}")
+            logger.debug(f"Added activity: {activity['name']}")
         except Exception as e:
             error_count += 1
-            logger.error(f"Failed to add activity '{activity.get('title', 'Unknown')}': {e}")
+            logger.error(f"Failed to add activity '{activity.get('name', 'Unknown')}': {e}")
 
     # Seed strategies
     logger.info("Seeding strategies collection...")

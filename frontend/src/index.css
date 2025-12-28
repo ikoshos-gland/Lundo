@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================
+   Design System - Lundo Frontend
+   ======================================== */
+
+@layer base {
+    :root {
+        /* Primary Colors */
+        --color-primary: #d97757;
+        --color-primary-light: #fff7ed;
+        --color-primary-dark: #c26245;
+
+        /* Neutral Colors */
+        --color-bg: #fdfcf8;
+        --color-surface: #ffffff;
+        --color-surface-alt: #fbfaf9;
+        --color-border: #e7e5e4;
+        --color-text: #292524;
+        --color-text-muted: #78716c;
+        --color-text-subtle: #a8a29e;
+
+        /* Shadows */
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+        --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.12);
+
+        /* Animation */
+        --transition-fast: 150ms ease;
+        --transition-normal: 300ms ease;
+    }
+
+    .dark {
+        --color-bg: #0c0a09;
+        --color-surface: #1c1917;
+        --color-surface-alt: #171514;
+        --color-border: #292524;
+        --color-text: #fafaf9;
+        --color-text-muted: #a8a29e;
+        --color-text-subtle: #78716c;
+
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+        --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    html {
+        scroll-behavior: smooth;
+        font-family: 'Outfit', system-ui, sans-serif;
+    }
+
+    body {
+        @apply bg-warm-50 dark:bg-warm-950 text-warm-600 dark:text-warm-300 antialiased;
+        transition: background-color var(--transition-normal), color var(--transition-normal);
+    }
+
+    ::selection {
+        @apply bg-primary-600 text-white;
+    }
+}
+
+@layer components {
+
+    /* Custom scrollbar for chat areas */
+    .chat-scroll::-webkit-scrollbar {
+        width: 5px;
+    }
+
+    .chat-scroll::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .chat-scroll::-webkit-scrollbar-thumb {
+        @apply bg-warm-200 dark:bg-warm-700 rounded-full;
+    }
+
+    .chat-scroll::-webkit-scrollbar-thumb:hover {
+        @apply bg-warm-300 dark:bg-warm-600;
+    }
+
+    /* Custom range slider */
+    input[type='range'] {
+        -webkit-appearance: none;
+        width: 100%;
+        background: transparent;
+    }
+
+    input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        height: 20px;
+        width: 20px;
+        border-radius: 50%;
+        @apply bg-primary-600;
+        cursor: pointer;
+        margin-top: -8px;
+        box-shadow: 0 2px 6px rgba(217, 119, 87, 0.3);
+        border: 2px solid white;
+    }
+
+    .dark input[type='range']::-webkit-slider-thumb {
+        border-color: #292524;
+    }
+
+    input[type='range']::-webkit-slider-runnable-track {
+        width: 100%;
+        height: 4px;
+        cursor: pointer;
+        @apply bg-warm-200 dark:bg-warm-700 rounded-full;
+    }
+
+    /* Toggle switch */
+    .toggle-checkbox:checked {
+        right: 0;
+        @apply border-primary-600;
+    }
+
+    .toggle-checkbox:checked+.toggle-label {
+        @apply bg-primary-600;
+    }
+
+    /* Glass effect */
+    .glass {
+        @apply bg-white/80 dark:bg-warm-950/80 backdrop-blur-md;
+    }
+}
+
+@layer utilities {
+
+    /* Animation delays */
+    .animation-delay-2000 {
+        animation-delay: 2s;
+    }
+
+    .animation-delay-4000 {
+        animation-delay: 4s;
+    }
+
+    /* Gradient text */
+    .text-gradient {
+        @apply bg-gradient-to-r from-primary-600 to-primary-500 bg-clip-text text-transparent;
+    }
+}

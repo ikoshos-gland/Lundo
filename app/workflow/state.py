@@ -36,10 +36,16 @@ class TherapistState(TypedDict):
 
     # Final synthesis
     final_response: Optional[str]
+    synthesized_response: Optional[str]
+    filtered_response: Optional[str]
 
     # Safety checks
     requires_human_review: bool
     safety_flags: list[str]
+
+    # Human-in-the-loop
+    was_interrupted: bool
+    human_decision: Optional[str]
 
     # Metadata
     conversation_id: int

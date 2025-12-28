@@ -1,11 +1,60 @@
 """Supervisor Agent - Main orchestrator for the therapist system."""
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
+from pydantic import BaseModel, Field
+
+from langchain_openai import AzureChatOpenAI
 
 from app.workflow.graph import run_therapist_workflow
-from app.memory.backends import MemoryBackends
 from app.memory.schemas import ChildMemory, add_behavioral_pattern, add_timeline_event
 from app.config import settings
+
+
+# Structured output schema for LLM-based memory extraction
+class ExtractedLifeEvent(BaseModel):
+    """A significant life event mentioned in conversation."""
+    event: str = Field(description="Brief description of the life event")
+    category: str = Field(
+        description="Category: 'death', 'divorce', 'moving', 'new_sibling', 'medical', 'school_change', 'other'"
+    )
+    impact: str = Field(description="Potential emotional/behavioral impact on the child")
+
+
+class ExtractedBehavior(BaseModel):
+    """A specific behavior mentioned in conversation."""
+    behavior: str = Field(description="The specific behavior described")
+    triggers: List[str] = Field(default_factory=list, description="What triggers this behavior")
+    context: str = Field(description="When/where this behavior occurs")
+
+
+class ExtractedFamilyContext(BaseModel):
+    """Family context information."""
+    context_type: str = Field(description="Type: 'family_structure', 'relationship', 'living_situation', 'other'")
+    details: str = Field(description="Details of the family context")
+
+
+class ExtractedMemory(BaseModel):
+    """Complete extracted memory from a conversation."""
+    life_events: List[ExtractedLifeEvent] = Field(
+        default_factory=list,
+        description="Significant life events mentioned (death, divorce, moving, etc.)"
+    )
+    behaviors: List[ExtractedBehavior] = Field(
+        default_factory=list,
+        description="Specific behaviors the parent is concerned about"
+    )
+    family_context: List[ExtractedFamilyContext] = Field(
+        default_factory=list,
+        description="Relevant family context (single parent, siblings, etc.)"
+    )
+    emotional_triggers: List[str] = Field(
+        default_factory=list,
+        description="Emotional triggers identified"
+    )
+    should_remember: bool = Field(
+        default=False,
+        description="True if there's important information worth storing for future sessions"
+    )
 
 
 class SupervisorAgent:
@@ -22,7 +71,18 @@ class SupervisorAgent:
 
     def __init__(self):
         """Initialize the supervisor agent."""
-        self.memory_backends = MemoryBackends(settings.database_url)
+        # Use singleton to avoid multiple connections/setup calls
+        from app.memory.backends import get_memory_backends
+        self.memory_backends = get_memory_backends()
+
+        # LLM for memory extraction (using structured output)
+        # Note: Some models don't support temperature=0, so we use default (1)
+        self.extraction_llm = AzureChatOpenAI(
+            azure_deployment=settings.azure_openai_deployment,
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_key=settings.azure_openai_api_key,
+            api_version=settings.azure_openai_api_version
+        ).with_structured_output(ExtractedMemory)
 
     async def process_message(
         self,
@@ -61,6 +121,12 @@ class SupervisorAgent:
             user_message=user_message
         )
 
+        # Debug: log final_state keys and final_response
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[SUPERVISOR] final_state keys: {list(final_state.keys())}")
+        logger.info(f"[SUPERVISOR] final_response value: {final_state.get('final_response')[:100] if final_state.get('final_response') else 'NONE'}")
+
         # Update long-term memory if needed
         await self._update_memory_from_conversation(
             child_id=child_id,
@@ -69,8 +135,8 @@ class SupervisorAgent:
             child_age=child_age
         )
 
-        # Extract response
-        response = final_state.get("final_response", "I apologize, I encountered an error.")
+        # Extract response (use 'or' to handle None values, not just missing keys)
+        response = final_state.get("final_response") or "I apologize, I encountered an error."
 
         return {
             "response": response,
@@ -92,7 +158,7 @@ class SupervisorAgent:
         child_age: int
     ) -> None:
         """
-        Update child's long-term memory based on conversation.
+        Update child's long-term memory based on conversation using LLM extraction.
 
         Args:
             child_id: Child's ID
@@ -100,10 +166,27 @@ class SupervisorAgent:
             behavior_analysis: Analysis from behavior analyst
             child_age: Child's age
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Extract important information using LLM
+        extracted = await self._extract_memory_with_llm(concern, behavior_analysis)
+
+        # Only proceed if there's something worth remembering
+        if not extracted.should_remember:
+            logger.debug(f"[MEMORY] No significant information to store for child {child_id}")
+            return
+
+        logger.info(f"[MEMORY] Extracting memories for child {child_id}: "
+                   f"{len(extracted.life_events)} life events, "
+                   f"{len(extracted.behaviors)} behaviors, "
+                   f"{len(extracted.family_context)} family context items")
+
         # Get existing memory or create new
         memory_data = await self.memory_backends.get_long_term_memory(
             child_id=child_id,
-            memory_type="behavioral_patterns"
+            memory_type="behavioral_patterns",
+            key="main"
         )
 
         if memory_data:
@@ -111,78 +194,138 @@ class SupervisorAgent:
         else:
             child_memory = ChildMemory(child_id=child_id)
 
-        # Simple keyword extraction for behavioral patterns
-        # In production, use NLP for better extraction
-        behavior_keywords = self._extract_behavior_keywords(concern)
+        # Store life events as timeline events
+        for life_event in extracted.life_events:
+            # Map extracted category to schema category
+            category_mapping = {
+                "death": "life_change",
+                "divorce": "life_change",
+                "moving": "life_change",
+                "new_sibling": "life_change",
+                "medical": "medical",
+                "school_change": "life_change",
+                "other": "other"
+            }
+            category = category_mapping.get(life_event.category, "other")
 
-        if behavior_keywords:
-            # Add new behavioral pattern
-            child_memory = add_behavioral_pattern(
-                memory=child_memory,
-                behavior=behavior_keywords.get("behavior", concern[:100]),
-                context=concern[:200],
-                frequency="observed_once",  # Update with actual tracking
-                triggers=behavior_keywords.get("triggers", []),
-                severity="mild"  # Default, should be analyzed
-            )
-
-        # Add timeline event for significant discussions
-        if len(concern) > 50:  # Only for substantial concerns
             child_memory = add_timeline_event(
                 memory=child_memory,
-                event=f"Parent discussed: {concern[:100]}",
-                category="challenge",
-                impact="Seeking guidance",
+                event=life_event.event,
+                category=category,
+                impact=life_event.impact,
                 behavioral_changes=[]
             )
+            logger.info(f"[MEMORY] Added life event: {life_event.event}")
 
-        # Save updated memory
+        # Store behavioral patterns
+        for behavior in extracted.behaviors:
+            child_memory = add_behavioral_pattern(
+                memory=child_memory,
+                behavior=behavior.behavior,
+                context=behavior.context,
+                frequency="observed_once",
+                triggers=behavior.triggers,
+                severity="mild"
+            )
+            logger.info(f"[MEMORY] Added behavior: {behavior.behavior}")
+
+        # Store family context as a separate memory type
+        if extracted.family_context:
+            family_data = {
+                "child_id": child_id,
+                "contexts": [
+                    {"type": ctx.context_type, "details": ctx.details}
+                    for ctx in extracted.family_context
+                ],
+                "last_updated": datetime.now().isoformat()
+            }
+            await self.memory_backends.save_long_term_memory(
+                child_id=child_id,
+                memory_type="family_context",
+                key="main",
+                data=family_data
+            )
+            logger.info(f"[MEMORY] Saved family context: {len(extracted.family_context)} items")
+
+        # Store emotional triggers
+        if extracted.emotional_triggers:
+            triggers_data = await self.memory_backends.get_long_term_memory(
+                child_id=child_id,
+                memory_type="triggers_and_responses",
+                key="emotional_triggers"
+            ) or {"triggers": []}
+
+            # Add new triggers (avoid duplicates)
+            existing_triggers = set(triggers_data.get("triggers", []))
+            new_triggers = [t for t in extracted.emotional_triggers if t not in existing_triggers]
+            triggers_data["triggers"] = list(existing_triggers) + new_triggers
+            triggers_data["last_updated"] = datetime.now().isoformat()
+
+            await self.memory_backends.save_long_term_memory(
+                child_id=child_id,
+                memory_type="triggers_and_responses",
+                key="emotional_triggers",
+                data=triggers_data
+            )
+            logger.info(f"[MEMORY] Added {len(new_triggers)} emotional triggers")
+
+        # Save updated main memory
         await self.memory_backends.save_long_term_memory(
             child_id=child_id,
             memory_type="behavioral_patterns",
+            key="main",
             data=child_memory.to_dict()
         )
 
-    def _extract_behavior_keywords(self, text: str) -> Dict[str, Any]:
+    async def _extract_memory_with_llm(self, concern: str, behavior_analysis: str) -> ExtractedMemory:
         """
-        Extract behavior-related keywords from text.
+        Extract important information from conversation using LLM.
 
-        This is a simple implementation. In production, use NLP or LLM.
+        Uses structured output to reliably extract:
+        - Life events (death, divorce, moving, etc.)
+        - Behavioral patterns
+        - Family context
+        - Emotional triggers
 
         Args:
-            text: Text to analyze
+            concern: Parent's message/concern
+            behavior_analysis: Analysis from behavior analyst
 
         Returns:
-            Dictionary with extracted information
+            ExtractedMemory with structured information
         """
-        # Common behavioral keywords
-        behavior_verbs = [
-            "hitting", "biting", "screaming", "crying", "refusing",
-            "tantrum", "yelling", "throwing", "breaking", "pushing"
-        ]
+        extraction_prompt = f"""Analyze this parent's message and extract important information to remember for future sessions.
 
-        trigger_words = [
-            "when", "after", "before", "during", "because"
-        ]
+PARENT'S MESSAGE:
+{concern}
 
-        text_lower = text.lower()
+BEHAVIOR ANALYSIS:
+{behavior_analysis if behavior_analysis else "Not available"}
 
-        # Find behaviors
-        behaviors = [verb for verb in behavior_verbs if verb in text_lower]
+Extract:
+1. LIFE EVENTS: Any significant events mentioned (death in family, divorce, moving, new sibling, medical issues, school changes)
+2. BEHAVIORS: Specific child behaviors the parent is concerned about
+3. FAMILY CONTEXT: Family structure info (single parent, siblings, living situation)
+4. EMOTIONAL TRIGGERS: What triggers emotional responses in the child
 
-        # Find potential triggers (simple heuristic)
-        triggers = []
-        for trigger_word in trigger_words:
-            if trigger_word in text_lower:
-                # Extract context around trigger word
-                idx = text_lower.find(trigger_word)
-                context = text[max(0, idx-20):min(len(text), idx+50)]
-                triggers.append(context.strip())
+Set should_remember=True if ANY of the following are mentioned:
+- Death or loss in the family
+- Divorce or separation
+- Major life changes
+- Trauma or abuse
+- Medical conditions
+- Important family context
 
-        return {
-            "behavior": behaviors[0] if behaviors else None,
-            "triggers": triggers[:3]  # Limit to 3 triggers
-        }
+Be thorough but concise. Only extract information that would be valuable for a therapist to remember."""
+
+        try:
+            extracted = await self.extraction_llm.ainvoke(extraction_prompt)
+            return extracted
+        except Exception as e:
+            # Log error and return empty extraction
+            import logging
+            logging.getLogger(__name__).error(f"Memory extraction failed: {e}")
+            return ExtractedMemory()
 
     async def get_conversation_summary(
         self,

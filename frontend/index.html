@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Child Behavioral Therapist</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+      /* Custom scrollbar for chat */
+      .chat-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .chat-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .chat-scroll::-webkit-scrollbar-thumb {
+        background: #a8a29e;
+        border-radius: 4px;
+      }
+
+      .chat-scroll::-webkit-scrollbar-thumb:hover {
+        background: #78716c;
+      }
+
+      /* Dark mode scrollbar */
+      .dark .chat-scroll::-webkit-scrollbar-thumb {
+        background: #57534e;
+      }
+
+      .dark .chat-scroll::-webkit-scrollbar-thumb:hover {
+        background: #78716c;
+      }
+
+      /* Smooth scroll behavior */
+      html {
+        scroll-behavior: smooth;
+      }
+
+      /* Custom range slider */
+      input[type="range"]::-webkit-slider-thumb {
+        appearance: none;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #d97757;
+        cursor: pointer;
+      }
+
+      input[type="range"]::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #d97757;
+        cursor: pointer;
+        border: none;
+      }
+
+      /* Custom toggle switch */
+      input[type="checkbox"].toggle {
+        appearance: none;
+        width: 48px;
+        height: 24px;
+        background: #e7e5e4;
+        border-radius: 12px;
+        position: relative;
+        cursor: pointer;
+        transition: background 0.3s;
+      }
+
+      input[type="checkbox"].toggle:checked {
+        background: #d97757;
+      }
+
+      input[type="checkbox"].toggle::before {
+        content: '';
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: white;
+        top: 2px;
+        left: 2px;
+        transition: transform 0.3s;
+      }
+
+      input[type="checkbox"].toggle:checked::before {
+        transform: translateX(24px);
+      }
+    </style>
+  </head>
+  <body class="overflow-x-hidden">
+    <!-- Dynamic Animated Background -->
+    <div class="fixed inset-0 -z-10 h-full w-full transition-colors duration-300 overflow-hidden">
+      <!-- Light Mode Blobs -->
+      <div class="absolute inset-0 opacity-100 dark:opacity-0 transition-opacity duration-700 bg-[#fdfcf8]">
+        <div class="absolute top-0 -left-4 w-96 h-96 bg-[#fed7aa] rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
+        <div class="absolute top-0 -right-4 w-96 h-96 bg-[#ffedd5] rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
+        <div class="absolute -bottom-32 left-20 w-96 h-96 bg-[#e7e5e4] rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
+        <div class="absolute bottom-40 right-10 w-80 h-80 bg-[#ffdbd0] rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
+      </div>
+      <!-- Dark Mode Blobs -->
+      <div class="absolute inset-0 opacity-0 dark:opacity-100 transition-opacity duration-700 bg-[#0c0a09]">
+        <div class="absolute top-0 -left-4 w-96 h-96 bg-[#292524] rounded-full mix-blend-screen filter blur-[100px] opacity-20 animate-blob"></div>
+        <div class="absolute top-0 -right-4 w-96 h-96 bg-[#431407] rounded-full mix-blend-screen filter blur-[100px] opacity-10 animate-blob animation-delay-2000"></div>
+        <div class="absolute -bottom-32 left-20 w-96 h-96 bg-[#1c1917] rounded-full mix-blend-screen filter blur-[100px] opacity-30 animate-blob animation-delay-4000"></div>
+      </div>
+    </div>
+
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
