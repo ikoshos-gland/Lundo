@@ -58,43 +58,13 @@ export interface StreamErrorEvent {
     error: string;
 }
 
-// Exploration phase types
-export type ExplorationPhase = 'not_started' | 'exploration_questions' | 'deep_questions' | 'completed';
-
-export interface QuestionAnswer {
-    question: string;
-    answer?: string;
-    question_type: 'exploration' | 'deep';
+// Knowledge gathering question event (question text is streamed via token events)
+export interface StreamQuestionEvent {
+    type: 'knowledge_gathering_question';
+    phase: number;
     question_number: number;
-    asked_at?: string;
-    answered_at?: string;
-}
-
-export interface ExplorationStatus {
-    phase: ExplorationPhase;
-    current_question_number: number;
     total_questions: number;
-    current_question?: string;
-    exploration_qa: QuestionAnswer[];
-    deep_qa: QuestionAnswer[];
-    initial_concern?: string;
-    topic_id?: string;
-}
-
-export interface ExplorationQuestionEvent {
-    question: string;
-    question_number: number;
-    question_type: 'exploration' | 'deep';
-    phase: ExplorationPhase;
-    is_last_question: boolean;
-    topic_id: string;
-}
-
-export interface ExplorationCompleteEvent {
-    exploration_qa: QuestionAnswer[];
-    deep_qa: QuestionAnswer[];
-    initial_concern: string;
-    topic_id: string;
+    // Note: question text is NOT included here - it's streamed via token events before this event
 }
 
 export type StreamEvent =
@@ -102,8 +72,7 @@ export type StreamEvent =
     | { type: 'done'; data: StreamDoneEvent }
     | { type: 'status'; data: StreamStatusEvent }
     | { type: 'error'; data: StreamErrorEvent }
-    | { type: 'exploration_question'; data: ExplorationQuestionEvent }
-    | { type: 'exploration_complete'; data: ExplorationCompleteEvent };
+    | { type: 'question'; data: StreamQuestionEvent };
 
 // Conversations API functions
 export const conversationsApi = {
@@ -223,19 +192,9 @@ export const conversationsApi = {
     },
 
     /**
-     * Get exploration phase status for a conversation
+     * Resume knowledge gathering with user's answer
      */
-    getExplorationStatus: async (conversationId: number): Promise<ExplorationStatus> => {
-        const response = await api.get<ExplorationStatus>(
-            `/conversations/${conversationId}/exploration/status`
-        );
-        return response.data;
-    },
-
-    /**
-     * Submit answer to exploration question and stream next question
-     */
-    submitExplorationAnswer: async function* (
+    resumeWithAnswer: async function* (
         conversationId: number,
         answer: string
     ): AsyncGenerator<StreamEvent, void, unknown> {
@@ -243,7 +202,7 @@ export const conversationsApi = {
         const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
 
         const response = await fetch(
-            `${baseUrl}/conversations/${conversationId}/exploration/answer`,
+            `${baseUrl}/conversations/${conversationId}/messages/resume`,
             {
                 method: 'POST',
                 headers: {
@@ -276,7 +235,7 @@ export const conversationsApi = {
 
                 // Parse SSE events from buffer
                 const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
+                buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
                 let eventType = '';
                 let eventData = '';
@@ -287,6 +246,7 @@ export const conversationsApi = {
                     } else if (line.startsWith('data: ')) {
                         eventData = line.slice(6);
                     } else if (line === '' && eventType && eventData) {
+                        // End of event
                         try {
                             const data = JSON.parse(eventData);
                             yield { type: eventType, data } as StreamEvent;

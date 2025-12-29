@@ -1,14 +1,21 @@
 """Workflow nodes for the behavioral therapist system."""
-from typing import Dict, Any, AsyncGenerator
+import logging
+from typing import Dict, Any, AsyncGenerator, Literal
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import AzureChatOpenAI
+from langgraph.types import interrupt
 
 from app.config import settings
 from app.workflow.state import TherapistState
 from app.agents.subagents.behavior_analyst import behavior_analyst
 from app.agents.subagents.material_consultant import material_consultant
+from app.agents.subagents.simple_question_agent import simple_question_agent
+from app.agents.subagents.followup_question_agent import followup_question_agent
+from app.agents.subagents.knowledge_compiler import knowledge_compiler
 from app.agents.skills.developmental_psychology import developmental_psychology_skill
 from app.agents.skills.behaviorist import behaviorist_skill
+
+logger = logging.getLogger(__name__)
 
 
 # Initialize LLM for routing and synthesis
@@ -245,8 +252,47 @@ async def synthesize_response(state: TherapistState) -> Dict[str, Any]:
 
     Node: Final synthesis.
     """
-    import logging
-    logger = logging.getLogger(__name__)
+    # Build gathered knowledge context if available
+    gathered_context = ""
+    if state.get("gathered_knowledge"):
+        gk = state["gathered_knowledge"]
+        logger.info("[SYNTHESIS] ====== USING GATHERED KNOWLEDGE IN RESPONSE ======")
+        logger.info(f"[SYNTHESIS] Initial concern: {gk.get('initial_concern', 'N/A')}")
+        logger.info(f"[SYNTHESIS] Child age: {gk.get('child_details', {}).get('age', 'N/A')}")
+        logger.info(f"[SYNTHESIS] Duration: {gk.get('situation_context', {}).get('duration', 'N/A')}")
+        logger.info(f"[SYNTHESIS] Frequency: {gk.get('situation_context', {}).get('frequency', 'N/A')}")
+        logger.info(f"[SYNTHESIS] Triggers: {gk.get('situation_context', {}).get('triggers', [])}")
+        logger.info(f"[SYNTHESIS] Focus areas: {gk.get('recommended_focus_areas', [])}")
+        logger.info("[SYNTHESIS] Building response with gathered knowledge context...")
+        gathered_context = f"""
+PARENT INTERVIEW INSIGHTS:
+{'-' * 60}
+Initial Concern (Refined): {gk.get('initial_concern', 'N/A')}
+
+Child Details:
+- Age: {gk.get('child_details', {}).get('age', 'N/A')}
+- Developmental Stage: {gk.get('child_details', {}).get('developmental_stage', 'N/A')}
+- Relevant History: {gk.get('child_details', {}).get('relevant_history', 'N/A')}
+
+Situation Context:
+- Duration: {gk.get('situation_context', {}).get('duration', 'N/A')}
+- Frequency: {gk.get('situation_context', {}).get('frequency', 'N/A')}
+- Triggers: {', '.join(gk.get('situation_context', {}).get('triggers', [])) or 'N/A'}
+- Settings: {', '.join(gk.get('situation_context', {}).get('settings', [])) or 'N/A'}
+- Previous Attempts: {gk.get('situation_context', {}).get('previous_attempts', 'N/A')}
+
+Severity Indicators: {', '.join(gk.get('severity_indicators', [])) or 'None identified'}
+Parent's Goals: {gk.get('parent_goals', 'N/A')}
+Key Insights: {gk.get('key_insights', 'N/A')}
+Recommended Focus Areas: {', '.join(gk.get('recommended_focus_areas', [])) or 'N/A'}
+
+{'-' * 60}
+
+"""
+    else:
+        logger.info("[SYNTHESIS] No gathered knowledge available - generating response without interview context")
+
+    logger.info("[SYNTHESIS] Building synthesis prompt...")
 
     # Build synthesis prompt
     synthesis_prompt = f"""
@@ -257,7 +303,7 @@ Parent's Emotional State: {state.get('parent_emotional_state', 'neutral')}
 Child's Age: {state['child_age']} years
 Parent's Concern: {state['current_concern']}
 
-ANALYSIS RESULTS:
+{gathered_context}ANALYSIS RESULTS:
 {'-' * 60}
 
 Behavior Pattern Analysis:
@@ -354,10 +400,49 @@ async def synthesize_response_streaming(state: TherapistState) -> AsyncGenerator
     Yields:
         Response tokens as strings
     """
-    import logging
-    logger = logging.getLogger(__name__)
+    # Build gathered knowledge context if available
+    gathered_context = ""
+    if state.get("gathered_knowledge"):
+        gk = state["gathered_knowledge"]
+        logger.info("[SYNTHESIS_STREAM] ====== USING GATHERED KNOWLEDGE IN RESPONSE ======")
+        logger.info(f"[SYNTHESIS_STREAM] Initial concern: {gk.get('initial_concern', 'N/A')}")
+        logger.info(f"[SYNTHESIS_STREAM] Child age: {gk.get('child_details', {}).get('age', 'N/A')}")
+        logger.info(f"[SYNTHESIS_STREAM] Duration: {gk.get('situation_context', {}).get('duration', 'N/A')}")
+        logger.info(f"[SYNTHESIS_STREAM] Frequency: {gk.get('situation_context', {}).get('frequency', 'N/A')}")
+        logger.info(f"[SYNTHESIS_STREAM] Triggers: {gk.get('situation_context', {}).get('triggers', [])}")
+        logger.info(f"[SYNTHESIS_STREAM] Focus areas: {gk.get('recommended_focus_areas', [])}")
+        logger.info("[SYNTHESIS_STREAM] Building response with gathered knowledge context...")
+        gathered_context = f"""
+PARENT INTERVIEW INSIGHTS:
+{'-' * 60}
+Initial Concern (Refined): {gk.get('initial_concern', 'N/A')}
 
-    # Build synthesis prompt (same as synthesize_response)
+Child Details:
+- Age: {gk.get('child_details', {}).get('age', 'N/A')}
+- Developmental Stage: {gk.get('child_details', {}).get('developmental_stage', 'N/A')}
+- Relevant History: {gk.get('child_details', {}).get('relevant_history', 'N/A')}
+
+Situation Context:
+- Duration: {gk.get('situation_context', {}).get('duration', 'N/A')}
+- Frequency: {gk.get('situation_context', {}).get('frequency', 'N/A')}
+- Triggers: {', '.join(gk.get('situation_context', {}).get('triggers', [])) or 'N/A'}
+- Settings: {', '.join(gk.get('situation_context', {}).get('settings', [])) or 'N/A'}
+- Previous Attempts: {gk.get('situation_context', {}).get('previous_attempts', 'N/A')}
+
+Severity Indicators: {', '.join(gk.get('severity_indicators', [])) or 'None identified'}
+Parent's Goals: {gk.get('parent_goals', 'N/A')}
+Key Insights: {gk.get('key_insights', 'N/A')}
+Recommended Focus Areas: {', '.join(gk.get('recommended_focus_areas', [])) or 'N/A'}
+
+{'-' * 60}
+
+"""
+    else:
+        logger.info("[SYNTHESIS] No gathered knowledge available - generating response without interview context")
+
+    logger.info("[SYNTHESIS] Building synthesis prompt...")
+
+    # Build synthesis prompt
     synthesis_prompt = f"""
 You are an empathetic child behavioral therapist assistant. Synthesize the following
 information into a warm, supportive, and actionable response for the parent.
@@ -366,7 +451,7 @@ Parent's Emotional State: {state.get('parent_emotional_state', 'neutral')}
 Child's Age: {state['child_age']} years
 Parent's Concern: {state['current_concern']}
 
-ANALYSIS RESULTS:
+{gathered_context}ANALYSIS RESULTS:
 {'-' * 60}
 
 Behavior Pattern Analysis:
@@ -408,3 +493,308 @@ Be specific and practical. Aim for 4-6 paragraphs.
     except Exception as e:
         logger.error(f"[SYNTHESIS_STREAM] Error: {e}")
         yield "I apologize, but I'm having trouble processing your message right now. Please try again in a moment."
+
+
+# ============================================================================
+# KNOWLEDGE GATHERING NODES
+# ============================================================================
+
+
+async def check_knowledge_gathering_needed(state: TherapistState) -> Dict[str, Any]:
+    """
+    Determine if knowledge gathering phase should be triggered.
+
+    Triggers when:
+    1. First message of a new conversation
+    2. Topic changed after a full report was given
+
+    Node: Entry point for knowledge gathering check.
+    """
+    logger.info("[KNOWLEDGE_CHECK] ====== ENTERING NODE ======")
+    logger.info(f"[KNOWLEDGE_CHECK] State keys: {list(state.keys())}")
+    logger.info(f"[KNOWLEDGE_CHECK] is_first_message: {state.get('is_first_message')}")
+    logger.info(f"[KNOWLEDGE_CHECK] report_just_given: {state.get('report_just_given')}")
+    logger.info(f"[KNOWLEDGE_CHECK] last_report_topic: {state.get('last_report_topic')}")
+
+    should_gather = False
+    reason = None
+
+    # Trigger 1: First message of conversation
+    if state.get("is_first_message", False):
+        should_gather = True
+        reason = "first_message"
+        logger.info("[KNOWLEDGE_CHECK] Triggered: First message of conversation")
+
+    # Trigger 2: Topic changed after a report
+    elif state.get("report_just_given", False) and state.get("last_report_topic"):
+        # Use LLM to detect topic change
+        is_new_topic = await _detect_topic_change(
+            previous_topic=state["last_report_topic"],
+            current_message=state["current_concern"] or state["messages"][-1].content
+        )
+        if is_new_topic:
+            should_gather = True
+            reason = "topic_change"
+            logger.info("[KNOWLEDGE_CHECK] Triggered: Topic changed after report")
+
+    logger.info(f"[KNOWLEDGE_CHECK] Result: should_gather={should_gather}, reason={reason}")
+
+    return {
+        **state,
+        "is_knowledge_gathering_active": should_gather,
+        "knowledge_gathering_phase": "phase_1" if should_gather else None,
+    }
+
+
+async def _detect_topic_change(previous_topic: str, current_message: str) -> bool:
+    """
+    Use LLM to detect if the current message is a new topic vs follow-up.
+
+    Returns:
+        True if this is a new topic, False if it's a follow-up
+    """
+    prompt = f"""Determine if the user's new message is about a NEW topic or a FOLLOW-UP to the previous topic.
+
+Previous topic: "{previous_topic}"
+New message: "{current_message}"
+
+Respond with ONLY one word: NEW or FOLLOWUP"""
+
+    try:
+        response = await llm.ainvoke(prompt)
+        result = response.content.strip().upper()
+        return result == "NEW"
+    except Exception as e:
+        logger.error(f"[TOPIC_CHANGE] Error detecting topic change: {e}")
+        return False  # Default to follow-up on error
+
+
+def route_after_knowledge_check(state: TherapistState) -> Literal["generate_phase_1_questions", "parse_input"]:
+    """
+    Conditional edge: Route based on whether knowledge gathering is needed.
+
+    Returns:
+        "generate_phase_1_questions" - Start knowledge gathering
+        "parse_input" - Skip to main workflow
+    """
+    if state.get("is_knowledge_gathering_active", False):
+        return "generate_phase_1_questions"
+    return "parse_input"
+
+
+async def generate_phase_1_questions(state: TherapistState) -> Dict[str, Any]:
+    """
+    Generate initial questions for Phase 1 using SimpleQuestionAgent.
+
+    Node: Phase 1 question generation.
+    """
+    logger.info("[PHASE_1] ====== ENTERING NODE ======")
+
+    # Get the initial concern from the message
+    initial_concern = state.get("current_concern") or ""
+    if not initial_concern and state["messages"]:
+        initial_concern = state["messages"][-1].content
+
+    logger.info(f"[PHASE_1] Initial concern: {initial_concern[:100]}...")
+    logger.info(f"[PHASE_1] Child age: {state.get('child_age')}")
+    logger.info("[PHASE_1] Calling simple_question_agent.generate_questions()...")
+
+    # Generate questions
+    try:
+        result = await simple_question_agent.generate_questions(
+            initial_concern=initial_concern,
+            child_age=state.get("child_age")
+        )
+        logger.info(f"[PHASE_1] Generated {result['question_count']} questions successfully")
+    except Exception as e:
+        logger.error(f"[PHASE_1] Error generating questions: {type(e).__name__}: {e}")
+        raise
+
+    return {
+        **state,
+        "current_concern": initial_concern,  # Ensure it's set
+        "phase_1_questions": result["questions"],
+        "phase_1_question_count": result["question_count"],
+        "phase_1_current_index": 0,
+        "phase_1_answers": [],
+        "knowledge_gathering_phase": "phase_1"
+    }
+
+
+async def ask_phase_1_question(state: TherapistState) -> Dict[str, Any]:
+    """
+    Ask the current Phase 1 question and wait for user response.
+
+    Uses LangGraph interrupt() for multi-turn conversation.
+
+    Node: Phase 1 question asking (interruptible).
+    """
+    logger.info("[PHASE_1_ASK] ====== ENTERING NODE ======")
+    current_idx = state["phase_1_current_index"]
+    questions = state.get("phase_1_questions", [])
+
+    logger.info(f"[PHASE_1_ASK] current_idx: {current_idx}, total questions: {len(questions)}")
+
+    if not questions or current_idx >= len(questions):
+        logger.error(f"[PHASE_1_ASK] Invalid state: no questions or index out of range")
+        raise ValueError(f"Invalid phase 1 state: questions={len(questions)}, idx={current_idx}")
+
+    question = questions[current_idx]
+    logger.info(f"[PHASE_1_ASK] Asking question {current_idx + 1}/{state['phase_1_question_count']}: {question[:50]}...")
+
+    # Interrupt to get user answer
+    # The question data is returned to the caller, workflow pauses
+    logger.info("[PHASE_1_ASK] Calling interrupt()...")
+    interrupt_data = {
+        "type": "knowledge_gathering_question",
+        "phase": 1,
+        "question_number": current_idx + 1,
+        "total_questions": state["phase_1_question_count"],
+        "question": question
+    }
+    logger.info(f"[PHASE_1_ASK] Interrupt data: {interrupt_data}")
+    answer = interrupt(interrupt_data)
+
+    # When resumed with Command(resume=answer), execution continues here
+    logger.info(f"[PHASE_1] Received answer for question {current_idx + 1}")
+    logger.info(f"[PHASE_1] Question: {question}")
+    logger.info(f"[PHASE_1] Answer: {answer}")
+
+    new_answers = list(state["phase_1_answers"]) + [{"question": question, "answer": answer}]
+    logger.info(f"[PHASE_1] Total answers collected: {len(new_answers)}/{state['phase_1_question_count']}")
+
+    return {
+        **state,
+        "phase_1_answers": new_answers,
+        "phase_1_current_index": current_idx + 1
+    }
+
+
+def check_phase_1_complete(state: TherapistState) -> Literal["ask_phase_1_question", "generate_phase_2_questions"]:
+    """
+    Conditional edge: Check if all Phase 1 questions have been answered.
+
+    Returns:
+        "ask_phase_1_question" - More questions remaining
+        "generate_phase_2_questions" - Phase 1 complete, proceed to Phase 2
+    """
+    if state["phase_1_current_index"] < state["phase_1_question_count"]:
+        return "ask_phase_1_question"
+    return "generate_phase_2_questions"
+
+
+async def generate_phase_2_questions(state: TherapistState) -> Dict[str, Any]:
+    """
+    Generate follow-up questions based on Phase 1 answers.
+
+    Node: Phase 2 question generation.
+    """
+    logger.info("[PHASE_2] Generating follow-up questions based on Phase 1 answers...")
+
+    result = await followup_question_agent.generate_followups(
+        phase_1_qa=state["phase_1_answers"],
+        initial_concern=state["current_concern"],
+        child_age=state.get("child_age")
+    )
+
+    logger.info(f"[PHASE_2] Generated {result['question_count']} follow-up questions")
+    logger.info(f"[PHASE_2] Key insights: {result['key_insights_so_far'][:100]}...")
+
+    return {
+        **state,
+        "phase_2_questions": result["questions"],
+        "phase_2_question_count": result["question_count"],
+        "phase_2_current_index": 0,
+        "phase_2_answers": [],
+        "knowledge_gathering_phase": "phase_2"
+    }
+
+
+async def ask_phase_2_question(state: TherapistState) -> Dict[str, Any]:
+    """
+    Ask the current Phase 2 follow-up question.
+
+    Uses LangGraph interrupt() for multi-turn conversation.
+
+    Node: Phase 2 question asking (interruptible).
+    """
+    current_idx = state["phase_2_current_index"]
+    question = state["phase_2_questions"][current_idx]
+
+    logger.info(f"[PHASE_2] Asking follow-up {current_idx + 1}/{state['phase_2_question_count']}: {question[:50]}...")
+
+    # Interrupt to get user answer
+    answer = interrupt({
+        "type": "knowledge_gathering_question",
+        "phase": 2,
+        "question_number": current_idx + 1,
+        "total_questions": state["phase_2_question_count"],
+        "question": question
+    })
+
+    logger.info(f"[PHASE_2] Received answer for follow-up {current_idx + 1}")
+    logger.info(f"[PHASE_2] Question: {question}")
+    logger.info(f"[PHASE_2] Answer: {answer}")
+
+    new_answers = list(state["phase_2_answers"]) + [{"question": question, "answer": answer}]
+    logger.info(f"[PHASE_2] Total follow-up answers collected: {len(new_answers)}/{state['phase_2_question_count']}")
+
+    return {
+        **state,
+        "phase_2_answers": new_answers,
+        "phase_2_current_index": current_idx + 1
+    }
+
+
+def check_phase_2_complete(state: TherapistState) -> Literal["ask_phase_2_question", "compile_gathered_knowledge"]:
+    """
+    Conditional edge: Check if all Phase 2 questions have been answered.
+
+    Returns:
+        "ask_phase_2_question" - More questions remaining
+        "compile_gathered_knowledge" - Phase 2 complete, compile knowledge
+    """
+    if state["phase_2_current_index"] < state["phase_2_question_count"]:
+        return "ask_phase_2_question"
+    return "compile_gathered_knowledge"
+
+
+async def compile_gathered_knowledge(state: TherapistState) -> Dict[str, Any]:
+    """
+    Compile all Q&A into structured knowledge for the main workflow.
+
+    Node: Knowledge compilation.
+    """
+    logger.info("[COMPILE] ====== COMPILING GATHERED KNOWLEDGE ======")
+    logger.info(f"[COMPILE] Phase 1 Q&A pairs: {len(state['phase_1_answers'])}")
+    for i, qa in enumerate(state['phase_1_answers'], 1):
+        logger.info(f"[COMPILE]   Q{i}: {qa['question']}")
+        logger.info(f"[COMPILE]   A{i}: {qa['answer']}")
+
+    logger.info(f"[COMPILE] Phase 2 Q&A pairs: {len(state['phase_2_answers'])}")
+    for i, qa in enumerate(state['phase_2_answers'], 1):
+        logger.info(f"[COMPILE]   Q{i}: {qa['question']}")
+        logger.info(f"[COMPILE]   A{i}: {qa['answer']}")
+
+    compiled = await knowledge_compiler.compile(
+        phase_1_qa=state["phase_1_answers"],
+        phase_2_qa=state["phase_2_answers"],
+        initial_concern=state["current_concern"],
+        child_age=state.get("child_age")
+    )
+
+    logger.info("[COMPILE] ====== COMPILED KNOWLEDGE RESULT ======")
+    logger.info(f"[COMPILE] Initial concern (refined): {compiled.get('initial_concern', 'N/A')}")
+    logger.info(f"[COMPILE] Child details: {compiled.get('child_details', {})}")
+    logger.info(f"[COMPILE] Situation context: {compiled.get('situation_context', {})}")
+    logger.info(f"[COMPILE] Severity indicators: {compiled.get('severity_indicators', [])}")
+    logger.info(f"[COMPILE] Parent goals: {compiled.get('parent_goals', 'N/A')}")
+    logger.info(f"[COMPILE] Key insights: {compiled.get('key_insights', 'N/A')}")
+    logger.info(f"[COMPILE] Recommended focus areas: {compiled.get('recommended_focus_areas', [])}")
+
+    return {
+        **state,
+        "gathered_knowledge": compiled,
+        "knowledge_gathering_phase": "complete",
+        "is_knowledge_gathering_active": False
+    }

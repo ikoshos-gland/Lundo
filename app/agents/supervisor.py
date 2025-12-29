@@ -157,7 +157,9 @@ class SupervisorAgent:
         parent_id: int,
         conversation_id: int,
         thread_id: str,
-        user_message: str
+        user_message: str,
+        is_first_message: bool = False,
+        last_report_topic: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Process a parent's message with streaming response.
@@ -172,12 +174,15 @@ class SupervisorAgent:
             conversation_id: Conversation database ID
             thread_id: LangGraph thread ID
             user_message: Parent's message
+            is_first_message: Whether this is the first message in conversation
+            last_report_topic: Topic of last full report (for topic change detection)
 
         Yields:
             Dictionary with event type and content:
             - {"type": "analysis_complete"}: Analysis phase done
             - {"type": "token", "content": "..."}: Response token
             - {"type": "done", "metadata": {...}}: Stream complete
+            - {"type": "interrupt", "data": {...}}: Knowledge gathering question
         """
         import logging
         logger = logging.getLogger(__name__)
@@ -190,7 +195,9 @@ class SupervisorAgent:
             parent_id=parent_id,
             conversation_id=conversation_id,
             thread_id=thread_id,
-            user_message=user_message
+            user_message=user_message,
+            is_first_message=is_first_message,
+            last_report_topic=last_report_topic
         ):
             event_type = event.get("type")
 
@@ -203,6 +210,13 @@ class SupervisorAgent:
                 token = event.get("content", "")
                 full_response += token
                 yield {"type": "token", "content": token}
+
+            elif event_type == "interrupt":
+                # Knowledge gathering question - forward to client
+                interrupt_data = event.get("data", {})
+                logger.info(f"[SUPERVISOR] Interrupt received: {interrupt_data.get('question', '')[:50]}...")
+                yield {"type": "interrupt", "data": interrupt_data}
+                return  # Stop processing, client will call resume endpoint
 
             elif event_type == "done":
                 # Get final state for metadata

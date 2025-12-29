@@ -1,24 +1,22 @@
 """Agent service for API integration."""
+import asyncio
 import logging
-from typing import Dict, Any, Optional, AsyncGenerator, Union
+from typing import Dict, Any, Optional, AsyncGenerator
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, desc
 
 from langchain_openai import AzureChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.types import Command
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.agents.supervisor import supervisor
 from app.models.child import Child
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.config import settings
-from app.services.exploration_service import exploration_service
-from app.schemas.exploration import (
-    ExplorationPhase,
-    QuestionResponse,
-    ExplorationCompleteResponse
-)
+from app.workflow.graph import create_analysis_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +49,36 @@ class AgentService:
                 max_tokens=150
             )
         return self._title_llm
+
+    async def _is_first_message(self, db: AsyncSession, conversation_id: int) -> bool:
+        """Check if this is the first message in the conversation."""
+        msg_count_result = await db.execute(
+            select(func.count(Message.id)).where(Message.conversation_id == conversation_id)
+        )
+        msg_count = msg_count_result.scalar()
+        return msg_count == 0
+
+    async def _get_last_report_topic(self, db: AsyncSession, conversation_id: int) -> Optional[str]:
+        """
+        Get the topic of the last full report (assistant message).
+
+        Returns None if no assistant messages exist or if the last message was from user.
+        """
+        # Get the last assistant message
+        result = await db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .where(Message.role == "assistant")
+            .order_by(desc(Message.id))
+            .limit(1)
+        )
+        last_assistant_msg = result.scalar_one_or_none()
+
+        if not last_assistant_msg:
+            return None
+
+        # Extract the topic (use first 200 chars as summary)
+        return last_assistant_msg.content[:200] if last_assistant_msg.content else None
 
     async def generate_conversation_title(
         self,
@@ -217,9 +245,6 @@ class AgentService:
         """
         Send a message and stream AI response token by token.
 
-        Handles exploration phase routing - if exploration is active or should
-        be triggered, routes to exploration flow instead of main workflow.
-
         Args:
             db: Database session
             conversation_id: Conversation ID
@@ -231,8 +256,6 @@ class AgentService:
             - {"type": "token", "data": {"content": "..."}}
             - {"type": "metadata", "data": {...}}
             - {"type": "done", "data": {...}}
-            - {"type": "exploration_question", "data": {...}}
-            - {"type": "exploration_complete", "data": {...}}
         """
         # Get conversation with child info
         result = await db.execute(
@@ -252,51 +275,23 @@ class AgentService:
         if not child or child.parent_id != user_id:
             raise PermissionError("Not authorized to access this conversation")
 
-        # Check exploration status
-        exploration_status = await exploration_service.get_exploration_status(
-            db, conversation_id
-        )
-
-        # If in exploration phase, this message is an answer
-        if exploration_status.phase in [
-            ExplorationPhase.EXPLORATION_QUESTIONS,
-            ExplorationPhase.DEEP_QUESTIONS
-        ]:
-            async for event in self._handle_exploration_answer(
-                db, conversation_id, child, content
-            ):
-                yield event
-            return
-
-        # Check if we should trigger exploration for new topic
-        should_explore, topic_summary = await exploration_service.should_trigger_exploration(
-            db, conversation_id, content
-        )
-
-        if should_explore:
-            # Start exploration phase
-            async for event in self._start_exploration(
-                db, conversation_id, child.id, content
-            ):
-                yield event
-            return
-
-        # Normal workflow - save user message first
-        user_message = Message(
-            conversation_id=conversation_id,
-            role="user",
-            content=content
-        )
-        db.add(user_message)
-        await db.commit()
-
         try:
             logger.info(f"Processing streaming message for child {child.id}, age {child.age_years}")
 
-            # Get exploration context to enrich the workflow
-            exploration_context = await exploration_service.get_exploration_context_for_workflow(
-                db, conversation_id
+            # Check BEFORE saving message (so count is accurate)
+            is_first_message = await self._is_first_message(db, conversation_id)
+            last_report_topic = await self._get_last_report_topic(db, conversation_id)
+
+            # Save user message to database
+            user_message = Message(
+                conversation_id=conversation_id,
+                role="user",
+                content=content
             )
+            db.add(user_message)
+            await db.commit()
+
+            logger.info(f"[STREAM] is_first_message={is_first_message}, has_last_report={last_report_topic is not None}")
 
             # Collect the full response for saving
             full_response = ""
@@ -310,11 +305,19 @@ class AgentService:
                 conversation_id=conversation_id,
                 thread_id=conversation.thread_id,
                 user_message=content,
-                exploration_context=exploration_context  # Pass exploration context
+                is_first_message=is_first_message,
+                last_report_topic=last_report_topic
             ):
                 event_type = event.get("type")
 
-                if event_type == "token":
+                if event_type == "interrupt":
+                    # Knowledge gathering question - yield to client
+                    interrupt_data = event.get("data", {})
+                    logger.info(f"[STREAM] Interrupt received: {interrupt_data.get('question', '')[:50]}...")
+                    yield {"type": "question", "data": interrupt_data}
+                    return  # Stop streaming, client will call resume endpoint
+
+                elif event_type == "token":
                     # Yield token to client
                     token = event.get("content", "")
                     full_response += token
@@ -375,121 +378,6 @@ class AgentService:
             logger.error(f"Error in streaming: {type(e).__name__}: {str(e)}", exc_info=True)
             await db.rollback()
             raise e
-
-    async def _start_exploration(
-        self,
-        db: AsyncSession,
-        conversation_id: int,
-        child_id: int,
-        initial_concern: str
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        Start exploration phase and yield first question.
-
-        Args:
-            db: Database session
-            conversation_id: Conversation ID
-            child_id: Child ID
-            initial_concern: The parent's initial concern
-
-        Yields:
-            exploration_question event with first question
-        """
-        logger.info(f"[EXPLORATION] Starting exploration for conversation {conversation_id}")
-
-        try:
-            # Start exploration and get first question
-            question_response = await exploration_service.start_exploration(
-                db, conversation_id, child_id, initial_concern
-            )
-
-            yield {
-                "type": "exploration_question",
-                "data": {
-                    "question": question_response.question,
-                    "question_number": question_response.question_number,
-                    "question_type": question_response.question_type,
-                    "phase": question_response.phase.value,
-                    "is_last_question": question_response.is_last_question,
-                    "topic_id": question_response.topic_id
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"Error starting exploration: {e}", exc_info=True)
-            raise
-
-    async def _handle_exploration_answer(
-        self,
-        db: AsyncSession,
-        conversation_id: int,
-        child: Child,
-        answer: str
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        Handle an answer during exploration phase.
-
-        Args:
-            db: Database session
-            conversation_id: Conversation ID
-            child: Child model instance
-            answer: User's answer
-
-        Yields:
-            exploration_question or exploration_complete event
-        """
-        logger.info(f"[EXPLORATION] Processing answer for conversation {conversation_id}")
-
-        try:
-            # Submit answer and get next question or completion
-            result = await exploration_service.submit_answer(
-                db, conversation_id, answer
-            )
-
-            if isinstance(result, QuestionResponse):
-                # More questions to ask
-                yield {
-                    "type": "exploration_question",
-                    "data": {
-                        "question": result.question,
-                        "question_number": result.question_number,
-                        "question_type": result.question_type,
-                        "phase": result.phase.value,
-                        "is_last_question": result.is_last_question,
-                        "topic_id": result.topic_id
-                    }
-                }
-            elif isinstance(result, ExplorationCompleteResponse):
-                # Exploration complete
-                yield {
-                    "type": "exploration_complete",
-                    "data": {
-                        "exploration_qa": [
-                            {
-                                "question": qa.question,
-                                "answer": qa.answer,
-                                "question_type": qa.question_type,
-                                "question_number": qa.question_number
-                            }
-                            for qa in result.exploration_qa
-                        ],
-                        "deep_qa": [
-                            {
-                                "question": qa.question,
-                                "answer": qa.answer,
-                                "question_type": qa.question_type,
-                                "question_number": qa.question_number
-                            }
-                            for qa in result.deep_qa
-                        ],
-                        "initial_concern": result.initial_concern,
-                        "topic_id": result.topic_id
-                    }
-                }
-
-        except Exception as e:
-            logger.error(f"Error handling exploration answer: {e}", exc_info=True)
-            raise
 
     async def create_conversation(
         self,
@@ -612,6 +500,153 @@ class AgentService:
             }
             for msg in messages
         ]
+
+    async def resume_with_answer(
+        self,
+        db: AsyncSession,
+        conversation_id: int,
+        user_id: int,
+        answer: str
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Resume a knowledge gathering workflow with the user's answer.
+
+        This is called when the user answers a knowledge gathering question.
+        The workflow resumes from where it was interrupted.
+
+        Args:
+            db: Database session
+            conversation_id: Conversation ID
+            user_id: Parent user ID
+            answer: User's answer to the question
+
+        Yields:
+            Events: question (next question), token (if streaming response), done
+        """
+        # Get conversation with child info
+        result = await db.execute(
+            select(Conversation).where(Conversation.id == conversation_id)
+        )
+        conversation = result.scalar_one_or_none()
+
+        if not conversation:
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        # Verify ownership
+        result = await db.execute(
+            select(Child).where(Child.id == conversation.child_id)
+        )
+        child = result.scalar_one_or_none()
+
+        if not child or child.parent_id != user_id:
+            raise PermissionError("Not authorized to access this conversation")
+
+        # Save the answer as a user message
+        answer_message = Message(
+            conversation_id=conversation_id,
+            role="user",
+            content=answer
+        )
+        db.add(answer_message)
+        await db.commit()
+
+        config = {
+            "configurable": {
+                "thread_id": conversation.thread_id
+            }
+        }
+
+        try:
+            logger.info(f"[RESUME] Resuming workflow for thread {conversation.thread_id} with answer")
+
+            # Use AsyncPostgresSaver to resume the workflow
+            async with AsyncPostgresSaver.from_conn_string(settings.postgres_connection_string) as checkpointer:
+                await checkpointer.setup()
+
+                # Create and compile the workflow with checkpointer
+                from app.workflow.graph import create_therapist_workflow
+                workflow = create_therapist_workflow()
+                compiled_workflow = workflow.compile(checkpointer=checkpointer)
+
+                # Resume with the answer using Command
+                # The workflow will continue from where it was interrupted
+                async for event in compiled_workflow.astream(
+                    Command(resume=answer),
+                    config,
+                    stream_mode="updates"
+                ):
+                    # Check for interrupt (next question)
+                    if "__interrupt__" in event:
+                        interrupt_data = event["__interrupt__"][0].value
+                        logger.info(f"[RESUME] Next question: {interrupt_data}")
+
+                        # Stream the question text character by character for typing effect
+                        question_text = interrupt_data.get("question", "")
+                        await asyncio.sleep(1.0)  # 1 second pause before typing starts
+                        for char in question_text:
+                            yield {"type": "token", "data": {"content": char}}
+                            await asyncio.sleep(0.015)  # Small delay for typing effect
+
+                        # Then send the question metadata (without text, since it was streamed)
+                        question_metadata = {
+                            "type": interrupt_data.get("type"),
+                            "phase": interrupt_data.get("phase"),
+                            "question_number": interrupt_data.get("question_number"),
+                            "total_questions": interrupt_data.get("total_questions"),
+                        }
+                        yield {"type": "question", "data": question_metadata}
+                        return  # Stop streaming, wait for next answer
+
+                # If we get here, the knowledge gathering is complete
+                # Now we need to run the rest of the workflow and stream the response
+                # Get the final state
+                state = await compiled_workflow.aget_state(config)
+
+                if state.values.get("knowledge_gathering_phase") == "complete":
+                    logger.info("[RESUME] Knowledge gathering complete, proceeding to main workflow")
+
+                    # The workflow should continue automatically
+                    # Stream the synthesis response
+                    from app.workflow.nodes import synthesize_response_streaming
+                    from app.safety.content_filter import filter_response
+
+                    yield {"type": "status", "data": {"status": "generating"}}
+
+                    full_response = ""
+                    async for token in synthesize_response_streaming(state.values):
+                        full_response += token
+                        yield {"type": "token", "data": {"content": token}}
+
+                    # Apply safety check
+                    safety_result = await filter_response(
+                        content=full_response,
+                        user_message=state.values.get("current_concern", ""),
+                        enable_hitl=False
+                    )
+
+                    # Save AI response to database
+                    ai_message = Message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=full_response,
+                        extra_data=str({"phase": "complete"})
+                    )
+                    db.add(ai_message)
+                    conversation.updated_at = datetime.now()
+                    await db.commit()
+
+                    yield {
+                        "type": "done",
+                        "data": {
+                            "message_id": ai_message.id,
+                            "requires_human_review": safety_result["requires_review"],
+                            "safety_flags": safety_result["safety_flags"]
+                        }
+                    }
+
+        except Exception as e:
+            logger.error(f"[RESUME] Error: {type(e).__name__}: {str(e)}", exc_info=True)
+            raise
 
 
 # Global service instance

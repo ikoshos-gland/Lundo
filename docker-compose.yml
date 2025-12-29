@@ -47,6 +47,23 @@ services:
     ports:
       - "8000:8000"
 
+  # Frontend Development Server
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: lundo-frontend
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=http://localhost:8080/api/v1
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
   # Main API Service
   api:
     build:

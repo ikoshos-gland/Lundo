@@ -1,16 +1,7 @@
 """Workflow state definition for LangGraph."""
-from typing import TypedDict, Annotated, Sequence, Optional, Dict, Any, List
-from enum import Enum
+from typing import TypedDict, Annotated, Sequence, Optional, Dict, Any
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-
-
-class ExplorationPhase(str, Enum):
-    """Exploration workflow phases."""
-    NOT_STARTED = "not_started"
-    EXPLORATION_QUESTIONS = "exploration_questions"
-    DEEP_QUESTIONS = "deep_questions"
-    COMPLETED = "completed"
 
 
 class TherapistState(TypedDict):
@@ -61,15 +52,39 @@ class TherapistState(TypedDict):
     thread_id: str
     session_notes: Dict[str, Any]
 
-    # Exploration phase tracking
-    exploration_phase: str  # ExplorationPhase value
-    exploration_question_index: int  # 0-4 for each phase
-    exploration_qa: List[Dict[str, str]]  # [{"question": "...", "answer": "..."}]
-    deep_qa: List[Dict[str, str]]  # [{"question": "...", "answer": "..."}]
-    initial_concern: str  # The triggering concern that started exploration
-    exploration_topic_id: Optional[str]  # UUID linking Q&A to specific topic
-    current_question: Optional[str]  # Current question being asked
-    current_question_type: Optional[str]  # "exploration" or "deep"
+    # === KNOWLEDGE GATHERING PHASE ===
+
+    # Phase tracking
+    knowledge_gathering_phase: Optional[str]  # "phase_1", "phase_2", "complete", None
+    is_knowledge_gathering_active: bool
+
+    # Phase 1: Simple Questions
+    phase_1_questions: list[str]  # Questions to ask in phase 1
+    phase_1_current_index: int  # Current question index (0-based)
+    phase_1_answers: list[Dict[str, str]]  # [{"question": str, "answer": str}]
+    phase_1_question_count: int  # How many questions to ask
+
+    # Phase 2: Follow-up Questions
+    phase_2_questions: list[str]  # Follow-up questions based on phase 1
+    phase_2_current_index: int  # Current follow-up question index
+    phase_2_answers: list[Dict[str, str]]  # [{"question": str, "answer": str}]
+    phase_2_question_count: int  # How many follow-ups needed
+
+    # Compiled context from knowledge gathering
+    gathered_knowledge: Optional[Dict[str, Any]]
+    # Structure: {
+    #   "initial_concern": str,
+    #   "child_details": {...},
+    #   "situation_context": {...},
+    #   "severity_indicators": [...],
+    #   "parent_goals": str,
+    #   "raw_qa": list[dict]
+    # }
+
+    # Trigger conditions
+    is_first_message: bool  # First message in conversation
+    last_report_topic: Optional[str]  # Topic of the last full report
+    report_just_given: bool  # Last response was a full report
 
 
 class AgentResponse(TypedDict):

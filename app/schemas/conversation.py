@@ -51,3 +51,27 @@ class MessageSendResponse(BaseModel):
     requires_human_review: bool
     safety_flags: List[str]
     metadata: Dict[str, Any]
+
+
+# === KNOWLEDGE GATHERING SCHEMAS ===
+
+
+class KnowledgeGatheringQuestion(BaseModel):
+    """Question event from knowledge gathering phase."""
+    type: str = "knowledge_gathering_question"
+    phase: int  # 1 or 2
+    question_number: int
+    total_questions: int
+    question: str
+
+
+class AnswerCreate(BaseModel):
+    """User's answer to a knowledge gathering question."""
+    answer: str = Field(min_length=1)
+
+
+class ResumeResponse(BaseModel):
+    """Response after resuming with an answer."""
+    status: str  # "next_question", "phase_complete", "gathering_complete"
+    next_question: Optional[KnowledgeGatheringQuestion] = None
+    message: Optional[str] = None

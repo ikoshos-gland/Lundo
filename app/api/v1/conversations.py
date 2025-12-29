@@ -18,7 +18,8 @@ from app.schemas.conversation import (
     ConversationWithMessages,
     MessageCreate,
     MessageResponse,
-    MessageSendResponse
+    MessageSendResponse,
+    AnswerCreate
 )
 from app.schemas.exploration import (
     ExplorationStatus,
@@ -377,6 +378,97 @@ async def send_message_stream(
 
         except Exception as e:
             logger.error(f"Streaming error: {str(e)}", exc_info=True)
+            error_data = json.dumps({"error": str(e)})
+            yield f"event: error\ndata: {error_data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
+
+
+@router.post("/{conversation_id}/messages/resume")
+async def resume_with_answer(
+    conversation_id: int,
+    answer_data: AnswerCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Resume a knowledge gathering workflow with the user's answer.
+
+    This endpoint is called when the user answers a knowledge gathering question.
+    The workflow resumes from where it was interrupted and may return:
+    - Another question (if more questions remain)
+    - The AI response stream (if knowledge gathering is complete)
+
+    SSE Event Types:
+    - question: A knowledge gathering question to ask the user
+    - status: Status update (e.g., "generating")
+    - token: A chunk of the response text
+    - done: Stream complete
+
+    Args:
+        conversation_id: Conversation ID
+        answer_data: User's answer to the question
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        StreamingResponse with SSE events
+    """
+    # Get conversation
+    result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
+    )
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+
+    if not conversation.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Conversation is not active"
+        )
+
+    # Verify ownership through child
+    child_result = await db.execute(
+        select(Child).where(Child.id == conversation.child_id)
+    )
+    child = child_result.scalar_one_or_none()
+
+    if not child or child.parent_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to send messages in this conversation"
+        )
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        """Generate SSE events for the resume response."""
+        agent_service = AgentService()
+
+        try:
+            async for event in agent_service.resume_with_answer(
+                db=db,
+                conversation_id=conversation_id,
+                user_id=current_user.id,
+                answer=answer_data.answer
+            ):
+                event_type = event.get("type", "token")
+                data = json.dumps(event.get("data", {}))
+                yield f"event: {event_type}\ndata: {data}\n\n"
+
+        except Exception as e:
+            logger.error(f"Resume streaming error: {str(e)}", exc_info=True)
             error_data = json.dumps({"error": str(e)})
             yield f"event: error\ndata: {error_data}\n\n"
 

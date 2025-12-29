@@ -7,9 +7,8 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Layout } from '../../components/layout';
 import { Button, Card } from '../../components/ui';
-import { childrenApi, conversationsApi, Child, Conversation, Message, ExplorationQuestionEvent } from '../../api';
+import { childrenApi, conversationsApi, Child, Conversation, Message } from '../../api';
 import ConfirmationModal from '../../components/ui/ConfirmationModal';
-import { QuestionCard, ExplorationProgress } from './components';
 import {
     Send,
     ArrowLeft,
@@ -140,10 +139,10 @@ const MessageBubble = ({
     };
 
     const isUser = message.role === 'user';
-    // Content is updated directly from the stream now
-    const content = message.content;
-    // Show cursor when streaming and this is the latest assistant message
-    const showCursor = isLatestAssistant && isStreaming && message.role === 'assistant';
+    // Content is updated directly from the stream now - trim to remove trailing whitespace
+    const content = message.content?.trim() || '';
+    // Cursor disabled - was causing visual issues
+    const showCursor = false;
 
     return (
         <motion.div
@@ -804,6 +803,7 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
     const navigate = useNavigate();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const isUserAtBottomRef = useRef(true); // Track if user is at bottom of chat
 
     // State
     const [children, setChildren] = useState<Child[]>([]);
@@ -818,11 +818,44 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
+    // Knowledge gathering state
+    const [isKnowledgeGathering, setIsKnowledgeGathering] = useState(false);
+    const [currentQuestion, setCurrentQuestion] = useState<{
+        phase: number;
+        questionNumber: number;
+        totalQuestions: number;
+        question: string;
+    } | null>(null);
 
-    // Exploration mode state
-    const [isExplorationMode, setIsExplorationMode] = useState(false);
-    const [currentQuestion, setCurrentQuestion] = useState<ExplorationQuestionEvent | null>(null);
-    const [explorationProgress, setExplorationProgress] = useState(0);
+    // Check if user is at bottom of chat container
+    const checkIfAtBottom = useCallback(() => {
+        const container = messagesContainerRef.current;
+        if (!container) return true;
+        const threshold = 100; // pixels from bottom to consider "at bottom"
+        const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+        isUserAtBottomRef.current = isAtBottom;
+        return isAtBottom;
+    }, []);
+
+    // Smart scroll - only scroll if user is at bottom
+    const scrollToBottomIfNeeded = useCallback(() => {
+        if (isUserAtBottomRef.current) {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, []);
+
+    // Track scroll position
+    useEffect(() => {
+        const container = messagesContainerRef.current;
+        if (!container) return;
+
+        const handleScroll = () => {
+            checkIfAtBottom();
+        };
+
+        container.addEventListener('scroll', handleScroll);
+        return () => container.removeEventListener('scroll', handleScroll);
+    }, [checkIfAtBottom]);
 
     // Load initial data
     useEffect(() => {
@@ -848,10 +881,10 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
         loadData();
     }, [searchParams]);
 
-    // Scroll to bottom when messages change
+    // Smart auto-scroll - only scrolls if user is already at bottom
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, isSending]);
+        scrollToBottomIfNeeded();
+    }, [messages, scrollToBottomIfNeeded]);
 
     const loadConversation = async (conversation: Conversation) => {
         try {
@@ -884,6 +917,9 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
         const messageContent = content || inputMessage.trim();
         if (!messageContent || !activeConversation || isSending) return;
 
+        // When user sends a message, ensure we scroll to show it
+        isUserAtBottomRef.current = true;
+
         setInputMessage('');
         setIsSending(true);
         setIsStreaming(true);
@@ -908,18 +944,24 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
         };
 
         try {
-            // Add the empty assistant message that will be filled with streamed content
-            setMessages(prev => [...prev, streamingMessage]);
+            // Don't add the empty message yet - wait for first token
+            // This prevents showing both TypingIndicator and empty message bubble
 
             // Stream the response
             let streamedContent = '';
             let finalMessageId = streamingMessageId;
+            let messageAdded = false;
 
             for await (const event of conversationsApi.sendMessageStream(
                 activeConversation.id,
                 messageContent
             )) {
                 if (event.type === 'token') {
+                    // Add the message on first token
+                    if (!messageAdded) {
+                        setMessages(prev => [...prev, streamingMessage]);
+                        messageAdded = true;
+                    }
                     // Append token to the streaming message
                     streamedContent += event.data.content;
                     setMessages(prev =>
@@ -929,16 +971,41 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
                                 : m
                         )
                     );
+                } else if (event.type === 'question') {
+                    // Knowledge gathering question received
+                    // Note: The question text was already streamed via token events
+                    // Make sure message is added if not yet
+                    if (!messageAdded) {
+                        setMessages(prev => [...prev, { ...streamingMessage, content: streamedContent }]);
+                        messageAdded = true;
+                    }
+                    const questionData = event.data;
+                    setIsKnowledgeGathering(true);
+                    setCurrentQuestion({
+                        phase: questionData.phase,
+                        questionNumber: questionData.question_number,
+                        totalQuestions: questionData.total_questions,
+                        question: streamedContent, // Use the streamed content
+                    });
+                    // Don't replace message content - it was already streamed
+                    setIsSending(false);
+                    setIsStreaming(false);
+                    return; // Stop processing, wait for user answer
                 } else if (event.type === 'done') {
                     // Update with final message ID and handle title update
                     finalMessageId = event.data.message_id;
-                    setMessages(prev =>
-                        prev.map(m =>
-                            m.id === streamingMessageId
-                                ? { ...m, id: finalMessageId, content: streamedContent }
-                                : m
-                        )
-                    );
+                    // Make sure message is added if not yet (edge case)
+                    if (!messageAdded && streamedContent) {
+                        setMessages(prev => [...prev, { ...streamingMessage, id: finalMessageId, content: streamedContent }]);
+                    } else {
+                        setMessages(prev =>
+                            prev.map(m =>
+                                m.id === streamingMessageId
+                                    ? { ...m, id: finalMessageId, content: streamedContent }
+                                    : m
+                            )
+                        );
+                    }
 
                     if (event.data.new_title) {
                         setActiveConversation(prev =>
@@ -952,21 +1019,6 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
                             )
                         );
                     }
-                } else if (event.type === 'exploration_question') {
-                    // Enter exploration mode with the question
-                    setIsExplorationMode(true);
-                    setCurrentQuestion(event.data);
-                    setExplorationProgress(event.data.question_number);
-                    // Remove the placeholder messages since we're in exploration mode
-                    setMessages(prev => prev.filter(m =>
-                        m.id !== tempUserMessage.id && m.id !== streamingMessageId
-                    ));
-                } else if (event.type === 'exploration_complete') {
-                    // Exit exploration mode
-                    setIsExplorationMode(false);
-                    setCurrentQuestion(null);
-                    setExplorationProgress(0);
-                    // The main workflow will now run automatically
                 } else if (event.type === 'error') {
                     console.error('Stream error:', event.data.error);
                     throw new Error(event.data.error);
@@ -985,41 +1037,97 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
         }
     };
 
-    // Handle exploration answer submission
-    const submitExplorationAnswer = async (answer: string) => {
-        if (!activeConversation || isSending) return;
+    // Handle answering knowledge gathering questions
+    const handleKnowledgeGatheringAnswer = async (answer: string) => {
+        if (!activeConversation || !currentQuestion) return;
+
+        // When user sends answer, ensure we scroll to show it
+        isUserAtBottomRef.current = true;
 
         setIsSending(true);
+        setIsStreaming(true);
+
+        // Add user's answer as a message
+        const answerMessage: Message = {
+            id: Date.now(),
+            conversation_id: activeConversation.id,
+            role: 'user',
+            content: answer,
+            created_at: new Date().toISOString(),
+        };
+        setMessages(prev => [...prev, answerMessage]);
+
+        // Create placeholder for next response (don't add yet - wait for first token)
+        const streamingMessageId = Date.now() + 1;
+        const streamingMessage: Message = {
+            id: streamingMessageId,
+            conversation_id: activeConversation.id,
+            role: 'assistant',
+            content: '',
+            created_at: new Date().toISOString(),
+        };
 
         try {
-            for await (const event of conversationsApi.submitExplorationAnswer(
+            let streamedContent = '';
+            let messageAdded = false;
+
+            for await (const event of conversationsApi.resumeWithAnswer(
                 activeConversation.id,
                 answer
             )) {
-                if (event.type === 'exploration_question') {
-                    // Show next question
-                    setCurrentQuestion(event.data);
-                    setExplorationProgress(event.data.question_number);
-                } else if (event.type === 'exploration_complete') {
-                    // Exit exploration mode - main workflow will run
-                    setIsExplorationMode(false);
-                    setCurrentQuestion(null);
-                    setExplorationProgress(0);
-
-                    // Now send a message to trigger the main workflow
-                    // The exploration context is already saved, just need to trigger analysis
+                if (event.type === 'token') {
+                    // Add the message on first token
+                    if (!messageAdded) {
+                        setMessages(prev => [...prev, streamingMessage]);
+                        messageAdded = true;
+                    }
+                    streamedContent += event.data.content;
+                    setMessages(prev =>
+                        prev.map(m =>
+                            m.id === streamingMessageId
+                                ? { ...m, content: streamedContent }
+                                : m
+                        )
+                    );
+                } else if (event.type === 'question') {
+                    // Another question - text was already streamed via token events
+                    if (!messageAdded) {
+                        setMessages(prev => [...prev, { ...streamingMessage, content: streamedContent }]);
+                        messageAdded = true;
+                    }
+                    const questionData = event.data;
+                    setCurrentQuestion({
+                        phase: questionData.phase,
+                        questionNumber: questionData.question_number,
+                        totalQuestions: questionData.total_questions,
+                        question: streamedContent, // Use the streamed content
+                    });
+                    // Don't replace message content - it was already streamed
                     setIsSending(false);
-                    await sendMessage(event.data.initial_concern);
+                    setIsStreaming(false);
                     return;
-                } else if (event.type === 'error') {
-                    console.error('Exploration error:', event.data.error);
-                    throw new Error(event.data.error);
+                } else if (event.type === 'done') {
+                    // Knowledge gathering complete, got final response
+                    setIsKnowledgeGathering(false);
+                    setCurrentQuestion(null);
+                    if (!messageAdded && streamedContent) {
+                        setMessages(prev => [...prev, { ...streamingMessage, id: event.data.message_id, content: streamedContent }]);
+                    } else {
+                        setMessages(prev =>
+                            prev.map(m =>
+                                m.id === streamingMessageId
+                                    ? { ...m, id: event.data.message_id, content: streamedContent }
+                                    : m
+                            )
+                        );
+                    }
                 }
             }
         } catch (error) {
-            console.error('Failed to submit exploration answer:', error);
+            console.error('Failed to submit answer:', error);
         } finally {
             setIsSending(false);
+            setIsStreaming(false);
         }
     };
 
@@ -1322,78 +1430,84 @@ const ChatPage = ({ isDark, toggleTheme }: ChatPageProps) => {
                                         </motion.div>
                                     )}
 
-                                    {/* Exploration Mode UI */}
-                                    {isExplorationMode && currentQuestion ? (
-                                        <>
-                                            <ExplorationProgress
-                                                currentQuestion={currentQuestion.question_number}
-                                                totalQuestions={10}
-                                                phase={currentQuestion.question_type}
-                                            />
-                                            <div className="flex-1 flex items-center justify-center">
-                                                <QuestionCard
-                                                    question={currentQuestion.question}
-                                                    questionNumber={currentQuestion.question_number}
-                                                    questionType={currentQuestion.question_type}
-                                                    onSubmit={submitExplorationAnswer}
-                                                    isSubmitting={isSending}
-                                                />
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <>
-                                            {/* Messages */}
-                                            {messages.map((message, index) => (
-                                                <MessageBubble
-                                                    key={message.id}
-                                                    message={message}
-                                                    isLatestAssistant={
-                                                        message.role === 'assistant' &&
-                                                        index === messages.length - 1
+                                    {/* Messages */}
+                                    {messages.map((message, index) => (
+                                        <MessageBubble
+                                            key={message.id}
+                                            message={message}
+                                            isLatestAssistant={
+                                                message.role === 'assistant' &&
+                                                index === messages.length - 1
+                                            }
+                                            isStreaming={isStreaming}
+                                            onCopy={() => { }}
+                                            onRegenerate={
+                                                message.role === 'assistant' && index === messages.length - 1
+                                                    ? () => {
+                                                        const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+                                                        if (lastUserMsg) {
+                                                            setMessages(prev => prev.slice(0, -1));
+                                                            sendMessage(lastUserMsg.content);
+                                                        }
                                                     }
-                                                    isStreaming={isStreaming}
-                                                    onCopy={() => { }}
-                                                    onRegenerate={
-                                                        message.role === 'assistant' && index === messages.length - 1
-                                                            ? () => {
-                                                                const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-                                                                if (lastUserMsg) {
-                                                                    setMessages(prev => prev.slice(0, -1));
-                                                                    sendMessage(lastUserMsg.content);
-                                                                }
-                                                            }
-                                                            : undefined
-                                                    }
-                                                    onFeedback={(type) => console.log(`Feedback: ${type} for message ${message.id}`)}
-                                                />
-                                            ))}
+                                                    : undefined
+                                            }
+                                            onFeedback={(type) => console.log(`Feedback: ${type} for message ${message.id}`)}
+                                        />
+                                    ))}
 
-                                            {/* Typing Indicator */}
-                                            <AnimatePresence>
-                                                {isSending && <TypingIndicator />}
-                                            </AnimatePresence>
-                                        </>
-                                    )}
+                                    {/* Typing Indicator */}
+                                    <AnimatePresence>
+                                        {isSending && <TypingIndicator />}
+                                    </AnimatePresence>
 
                                     <div ref={messagesEndRef} />
                                 </div>
 
-                                {/* Input Area - hide during exploration */}
-                                {!isExplorationMode && (
-                                    <div className="p-4 sm:p-6 border-t border-warm-100 dark:border-warm-800 bg-white/80 dark:bg-warm-900/80 backdrop-blur-sm">
-                                        <ChatInput
-                                            value={inputMessage}
-                                            onChange={setInputMessage}
-                                            onSubmit={() => sendMessage()}
-                                            disabled={isSending}
-                                            placeholder={`Ask anything about ${getChildName(activeConversation.child_id)}...`}
-                                        />
-                                        <div className="flex items-center justify-center gap-2 mt-3 text-xs text-warm-400 dark:text-warm-500">
-                                            <Sparkles className="w-3 h-3" />
-                                            <span>AI responses are for informational purposes. Consult professionals for medical advice.</span>
+                                {/* Input Area */}
+                                <div className="p-4 sm:p-6 border-t border-warm-100 dark:border-warm-800 bg-white/80 dark:bg-warm-900/80 backdrop-blur-sm">
+                                    {/* Knowledge gathering progress indicator */}
+                                    {isKnowledgeGathering && currentQuestion && (
+                                        <div className="mb-3 px-4 py-2 rounded-xl bg-gradient-to-r from-primary-50 to-rose-50 dark:from-primary-950/50 dark:to-rose-950/50 border border-primary-200 dark:border-primary-800">
+                                            <div className="flex items-center justify-between text-sm">
+                                                <span className="text-primary-700 dark:text-primary-300 font-medium">
+                                                    Getting to know your situation better
+                                                </span>
+                                                <span className="text-primary-600 dark:text-primary-400">
+                                                    Question {currentQuestion.questionNumber} of {currentQuestion.totalQuestions}
+                                                </span>
+                                            </div>
+                                            <div className="mt-2 h-1.5 bg-primary-100 dark:bg-primary-900 rounded-full overflow-hidden">
+                                                <div
+                                                    className="h-full bg-gradient-to-r from-primary-500 to-rose-500 rounded-full transition-all duration-300"
+                                                    style={{ width: `${(currentQuestion.questionNumber / currentQuestion.totalQuestions) * 100}%` }}
+                                                />
+                                            </div>
                                         </div>
+                                    )}
+                                    <ChatInput
+                                        value={inputMessage}
+                                        onChange={setInputMessage}
+                                        onSubmit={() => {
+                                            if (isKnowledgeGathering && currentQuestion) {
+                                                handleKnowledgeGatheringAnswer(inputMessage.trim());
+                                                setInputMessage('');
+                                            } else {
+                                                sendMessage();
+                                            }
+                                        }}
+                                        disabled={isSending}
+                                        placeholder={
+                                            isKnowledgeGathering
+                                                ? "Type your answer..."
+                                                : `Ask anything about ${getChildName(activeConversation.child_id)}...`
+                                        }
+                                    />
+                                    <div className="flex items-center justify-center gap-2 mt-3 text-xs text-warm-400 dark:text-warm-500">
+                                        <Sparkles className="w-3 h-3" />
+                                        <span>AI responses are for informational purposes. Consult professionals for medical advice.</span>
                                     </div>
-                                )}
+                                </div>
                             </>
                         )}
                     </div>
